@@ -4,7 +4,7 @@
 </template>
 
 <script>
-// import { RouterView } from 'vue-router';
+//  import { RouterView } from 'vue-router';
 import NavBar from './components/NavBar.vue'
 export default {
   name: 'App',
