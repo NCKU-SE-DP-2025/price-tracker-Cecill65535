@@ -4,7 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi.middleware.cors import CORSMiddleware
 import itertools
 from sqlalchemy import delete, insert, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker,relationship,sessionmaker
 from typing import List, Optional
 import requests
 from fastapi import APIRouter, HTTPException, Query, Depends, status, FastAPI
@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field, AnyHttpUrl
 from sqlalchemy import (Column, ForeignKey, Integer, String, Table, Text,
                         create_engine)
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
 
 Base = declarative_base()
 
@@ -74,7 +73,7 @@ sentry_sdk.init(
 )
 
 app = FastAPI()
-bgs = BackgroundScheduler()
+background_scheduler = BackgroundScheduler()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 app.add_middleware(
@@ -157,7 +156,7 @@ def get_new_info(search_term, is_initial=False):
     all_news_data = []
     # iterate pages to get more news data, not actually get all news data
     if is_initial:
-        a = []
+        news_datas = []
         for p in range(1, 10):
             p2 = {
                 "page": p,
@@ -166,10 +165,10 @@ def get_new_info(search_term, is_initial=False):
                 "type": "searchword",
             }
             response = requests.get("https://udn.com/api/more", params=p2)
-            a.append(response.json()["lists"])
+            news_datas.append(response.json()["lists"])
 
-        for l in a:
-            all_news_data.append(l)
+        for data in news_datas:
+            all_news_data.append(data)
     else:
         p = {
             "page": 1,
@@ -192,7 +191,7 @@ def get_new(is_initial=False):
     news_data = get_new_info("價格", is_initial=is_initial)
     for news in news_data:
         title = news["title"]
-        m = [
+        chat_messages = [
             {
                 "role": "system",
                 "content": "你是一個關聯度評估機器人，請評估新聞標題是否與「民生用品的價格變化」相關，並給予'high'、'medium'、'low'評價。(僅需回答'high'、'medium'、'low'三個詞之一)",
@@ -201,7 +200,7 @@ def get_new(is_initial=False):
         ]
         ai = OpenAI(api_key="xxx").chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=m,
+            messages=chat_messages,
         )
         relevance = ai.choices[0].message.content
         if relevance == "high":
@@ -250,13 +249,13 @@ def start_scheduler():
         # should change into simple factory pattern
         get_new()
     db.close()
-    bgs.add_job(get_new, "interval", minutes=100)
-    bgs.start()
+    background_scheduler.add_job(get_new, "interval", minutes=100)
+    background_scheduler.start()
 
 
-@app.on_event("shutdown")
+@app.on_event("shutdown") 
 def shutdown_scheduler():
-    bgs.shutdown()
+    background_scheduler.shutdown()
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -277,10 +276,10 @@ def verify(p1, p2):
 
 
 def check_user_password_is_correct(db, n, pwd):
-    OuO = db.query(User).filter(User.username == n).first()
-    if not verify(pwd, OuO.hashed_password):
+    password_data = db.query(User).filter(User.username == n).first()
+    if not verify(pwd, password_data.hashed_password):
         return False
-    return OuO
+    return password_data
 
 
 def authenticate_user_token(
@@ -406,7 +405,7 @@ class PromptRequest(BaseModel):
 async def search_news(request: PromptRequest):
     prompt = request.prompt
     news_list = []
-    m = [
+    chat_messages = [
         {
             "role": "system",
             "content": "你是一個關鍵字提取機器人，用戶將會輸入一段文字，表示其希望看見的新聞內容，請提取出用戶希望看見的關鍵字，請截取最重要的關鍵字即可，避免出現「新聞」、「資訊」等混淆搜尋引擎的字詞。(僅須回答關鍵字，若有多個關鍵字，請以空格分隔)",
@@ -416,7 +415,7 @@ async def search_news(request: PromptRequest):
 
     completion = OpenAI(api_key="xxx").chat.completions.create(
         model="gpt-3.5-turbo",
-        messages=m,
+        messages=chat_messages,
     )
     keywords = completion.choices[0].message.content
     # should change into simple factory pattern
@@ -457,7 +456,7 @@ async def news_summary(
         payload: NewsSumaryRequestSchema, u=Depends(authenticate_user_token)
 ):
     response = {}
-    m = [
+    chat_messages = [
         {
             "role": "system",
             "content": "你是一個新聞摘要生成機器人，請統整新聞中提及的影響及主要原因 (影響、原因各50個字，請以json格式回答 {'影響': '...', '原因': '...'})",
@@ -467,7 +466,7 @@ async def news_summary(
 
     completion = OpenAI(api_key="xxx").chat.completions.create(
         model="gpt-3.5-turbo",
-        messages=m,
+        messages=chat_messages,
     )
     result = completion.choices[0].message.content
     if result:
