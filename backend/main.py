@@ -336,17 +336,17 @@ def read_users_me(user=Depends(authenticate_user_token)):
 _id_counter = itertools.count(start=1000000)
 
 
-def get_article_upvote_details(article_id, uid, db):
+def get_article_upvote_details(article_id, user_id, db):
     cnt = (
         db.query(user_news_association_table)
         .filter_by(news_articles_id=article_id)
         .count()
     )
     voted = False
-    if uid:
+    if user_id:
         voted = (
                 db.query(user_news_association_table)
-                .filter_by(news_articles_id=article_id, user_id=uid)
+                .filter_by(news_articles_id=article_id, user_id=user_id)
                 .first()
                 is not None
         )
@@ -486,17 +486,17 @@ def upvote_article(
     return {"message": message}
 
 
-def toggle_upvote(n_id, u_id, db):
+def toggle_upvote(article_id, u_id, db):
     existing_upvote = db.execute(
         select(user_news_association_table).where(
-            user_news_association_table.c.news_articles_id == n_id,
+            user_news_association_table.c.news_articles_id == article_id,
             user_news_association_table.c.user_id == u_id,
         )
     ).scalar()
 
     if existing_upvote:
         delete_stmt = delete(user_news_association_table).where(
-            user_news_association_table.c.news_articles_id == n_id,
+            user_news_association_table.c.news_articles_id == article_id,
             user_news_association_table.c.user_id == u_id,
         )
         db.execute(delete_stmt)
@@ -504,7 +504,7 @@ def toggle_upvote(n_id, u_id, db):
         return "Upvote removed"
     else:
         insert_stmt = insert(user_news_association_table).values(
-            news_articles_id=n_id, user_id=u_id
+            news_articles_id=article_id, user_id=u_id
         )
         db.execute(insert_stmt)
         db.commit()
