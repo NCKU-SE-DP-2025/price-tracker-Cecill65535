@@ -126,7 +126,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 
-def add_new(news_data):
+def add_news_article(news_data):
     """
     add new to db
     :param news_data: news info
@@ -145,7 +145,7 @@ def add_new(news_data):
     session.close()
 
 
-def get_new_info(search_term, is_initial=False):
+def fetch_news_info(search_term, is_initial=False):
     """
     get new
 
@@ -181,14 +181,14 @@ def get_new_info(search_term, is_initial=False):
         all_news_data = response.json()["lists"]
     return all_news_data
 
-def get_new(is_initial=False):
+def fetch_initial_news(is_initial=False):
     """
     get new info
 
     :param is_initial:
     :return:
     """
-    news_data = get_new_info("價格", is_initial=is_initial)
+    news_data = fetch_news_info("價格", is_initial=is_initial)
     for news in news_data:
         title = news["title"]
         chat_messages = [
@@ -198,11 +198,11 @@ def get_new(is_initial=False):
             },
             {"role": "user", "content": f"{title}"},
         ]
-        ai = OpenAI(api_key="xxx").chat.completions.create(
+        ai_response = OpenAI(api_key="xxx").chat.completions.create(
             model="gpt-3.5-turbo",
             messages=chat_messages,
         )
-        relevance = ai.choices[0].message.content
+        relevance = ai_response.choices[0].message.content
         if relevance == "high":
             response = requests.get(news["titleLink"])
             soup = BeautifulSoup(response.text, "html.parser")
@@ -239,7 +239,7 @@ def get_new(is_initial=False):
             result = json.loads(result)
             detailed_news["summary"] = result["影響"]
             detailed_news["reason"] = result["原因"]
-            add_new(detailed_news)
+            add_news_article(detailed_news)
 
 
 @app.on_event("startup")
@@ -247,9 +247,9 @@ def start_scheduler():
     db = SessionLocal()
     if db.query(NewsArticle).count() == 0:
         # should change into simple factory pattern
-        get_new()
+        fetch_initial_news()
     db.close()
-    background_scheduler.add_job(get_new, "interval", minutes=100)
+    background_scheduler.add_job(fetch_initial_news, "interval", minutes=100)
     background_scheduler.start()
 
 
@@ -271,13 +271,13 @@ def session_opener():
 
 
 
-def verify(p1, p2):
-    return pwd_context.verify(p1, p2)
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify_password(plain_password, hashed_password)
 
 
-def check_user_password_is_correct(db, n, pwd):
-    password_data = db.query(User).filter(User.username == n).first()
-    if not verify(pwd, password_data.hashed_password):
+def check_user_password_is_correct(db, username, pwd):
+    password_data = db.query(User).filter(User.username == username).first()
+    if not verify_password(pwd, password_data.hashed_password):
         return False
     return password_data
 
@@ -301,7 +301,6 @@ def create_access_token(data, expires_delta=None):
     print(to_encode)
     encoded_jwt = jwt.encode(to_encode, '1892dhianiandowqd0n', algorithm="HS256")
     return encoded_jwt
-
 
 
 @app.post("/api/v1/users/login")
@@ -355,7 +354,7 @@ def get_article_upvote_details(article_id, uid, db):
 
 
 @app.get("/api/v1/news/news")
-def read_news(db=Depends(session_opener)):
+def read_all_news(db=Depends(session_opener)):
     """
     read new
 
@@ -377,19 +376,19 @@ def read_news(db=Depends(session_opener)):
 )
 def read_user_news(
         db=Depends(session_opener),
-        u=Depends(authenticate_user_token)
+        current_user=Depends(authenticate_user_token)
 ):
     """
     read user new
 
     :param db:
-    :param u:
+    :param current_user:
     :return:
     """
     news = db.query(NewsArticle).order_by(NewsArticle.time.desc()).all()
     result = []
     for article in news:
-        upvotes, upvoted = get_article_upvote_details(article.id, u.id, db)
+        upvotes, upvoted = get_article_upvote_details(article.id, current_user.id, db)
         result.append(
             {
                 **article.__dict__,
@@ -420,7 +419,7 @@ async def search_news(request: PromptRequest):
     )
     keywords = completion.choices[0].message.content
     # should change into simple factory pattern
-    news_items = get_new_info(keywords, is_initial=False)
+    news_items = fetch_news_info(keywords, is_initial=False)
     for news in news_items:
         try:
             response = requests.get(news["titleLink"])
@@ -449,12 +448,12 @@ async def search_news(request: PromptRequest):
             print(e)
     return sorted(news_list, key=lambda x: x["time"], reverse=True)
 
-class NewsSumaryRequestSchema(BaseModel):
+class NewsSummaryRequestSchema(BaseModel):
     content: str
 
 @app.post("/api/v1/news/news_summary")
 async def news_summary(
-        payload: NewsSumaryRequestSchema, u=Depends(authenticate_user_token)
+        payload: NewsSummaryRequestSchema, current_user=Depends(authenticate_user_token)
 ):
     response = {}
     ai_prompt_messages = [
@@ -481,9 +480,9 @@ async def news_summary(
 def upvote_article(
         id,
         db=Depends(session_opener),
-        u=Depends(authenticate_user_token),
+        current_user=Depends(authenticate_user_token),
 ):
-    message = toggle_upvote(id, u.id, db)
+    message = toggle_upvote(id, current_user.id, db)
     return {"message": message}
 
 
