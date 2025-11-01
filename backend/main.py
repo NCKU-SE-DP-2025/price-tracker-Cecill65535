@@ -60,11 +60,11 @@ class NewsArticle(Base):
     )
 
 
-engine = create_engine("sqlite:///news_database.db", echo=True)
+db_engine = create_engine("sqlite:///news_database.db", echo=True)
 
-Base.metadata.create_all(engine)
+Base.metadata.create_all(db_engine)
 
-Session = sessionmaker(bind=engine)
+Session = sessionmaker(bind=db_engine)
 
 sentry_sdk.init(
     dsn="https://4001ffe917ccb261aa0e0c34026dc343@o4505702629834752.ingest.us.sentry.io/4507694792704000",
@@ -74,7 +74,7 @@ sentry_sdk.init(
 
 app = FastAPI()
 background_scheduler = BackgroundScheduler()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
 
 app.add_middleware(
     CORSMiddleware,  # noqa
@@ -157,9 +157,9 @@ def fetch_news_info(search_term, is_initial=False):
     # iterate pages to get more news data, not actually get all news data
     if is_initial:
         news_datas = []
-        for p in range(1, 10):
+        for page in range(1, 10):
             p2 = {
-                "page": p,
+                "page": page,
                 "id": f"search:{quote(search_term)}",
                 "channelId": 2,
                 "type": "searchword",
@@ -170,13 +170,13 @@ def fetch_news_info(search_term, is_initial=False):
         for data in news_datas:
             all_news_data.append(data)
     else:
-        p = {
+        page = {
             "page": 1,
             "id": f"search:{quote(search_term)}",
             "channelId": 2,
             "type": "searchword",
         }
-        response = requests.get("https://udn.com/api/more", params=p)
+        response = requests.get("https://udn.com/api/more", params=page)
 
         all_news_data = response.json()["lists"]
     return all_news_data
@@ -213,9 +213,9 @@ def fetch_initial_news(is_initial=False):
             content_section = soup.find("section", class_="article-content__editor")
 
             paragraphs = [
-                p.text
-                for p in content_section.find_all("p")
-                if p.text.strip() != "" and "▪" not in p.text
+                page.text
+                for page in content_section.find_all("page")
+                if page.text.strip() != "" and "▪" not in page.text
             ]
             detailed_news =  {
                 "url": news["titleLink"],
@@ -263,7 +263,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/users/login")
 
 
 def session_opener():
-    session = Session(bind=engine)
+    session = Session(bind=db_engine)
     try:
         yield session
     finally:
@@ -336,17 +336,17 @@ def read_users_me(user=Depends(authenticate_user_token)):
 _id_counter = itertools.count(start=1000000)
 
 
-def get_article_upvote_details(article_id, uid, db):
+def get_article_upvote_details(article_id, user_id, db):
     cnt = (
         db.query(user_news_association_table)
         .filter_by(news_articles_id=article_id)
         .count()
     )
     voted = False
-    if uid:
+    if user_id:
         voted = (
                 db.query(user_news_association_table)
-                .filter_by(news_articles_id=article_id, user_id=uid)
+                .filter_by(news_articles_id=article_id, user_id=user_id)
                 .first()
                 is not None
         )
@@ -431,9 +431,9 @@ async def search_news(request: PromptRequest):
             content_section = soup.find("section", class_="article-content__editor")
 
             paragraphs = [
-                p.text
-                for p in content_section.find_all("p")
-                if p.text.strip() != "" and "▪" not in p.text
+                page.text
+                for page in content_section.find_all("page")
+                if page.text.strip() != "" and "▪" not in page.text
             ]
             detailed_news = {
                 "url": news["titleLink"],
@@ -486,25 +486,25 @@ def upvote_article(
     return {"message": message}
 
 
-def toggle_upvote(n_id, u_id, db):
+def toggle_upvote(article_id, user_id, db):
     existing_upvote = db.execute(
         select(user_news_association_table).where(
-            user_news_association_table.c.news_articles_id == n_id,
-            user_news_association_table.c.user_id == u_id,
+            user_news_association_table.c.news_articles_id == article_id,
+            user_news_association_table.c.user_id == user_id,
         )
     ).scalar()
 
     if existing_upvote:
         delete_stmt = delete(user_news_association_table).where(
-            user_news_association_table.c.news_articles_id == n_id,
-            user_news_association_table.c.user_id == u_id,
+            user_news_association_table.c.news_articles_id == article_id,
+            user_news_association_table.c.user_id == user_id,
         )
         db.execute(delete_stmt)
         db.commit()
         return "Upvote removed"
     else:
         insert_stmt = insert(user_news_association_table).values(
-            news_articles_id=n_id, user_id=u_id
+            news_articles_id=article_id, user_id=user_id
         )
         db.execute(insert_stmt)
         db.commit()
