@@ -4,7 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi.middleware.cors import CORSMiddleware
 import itertools
 from sqlalchemy import delete, insert, select
-from sqlalchemy.orm import Session, sessionmaker,relationship,sessionmaker
+from sqlalchemy.orm import Session, sessionmaker, relationship
 from typing import List, Optional
 import requests
 from fastapi import APIRouter, HTTPException, Query, Depends, status, FastAPI
@@ -13,25 +13,23 @@ from datetime import datetime, timedelta
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-
 from pydantic import BaseModel, Field, AnyHttpUrl
 from sqlalchemy import (Column, ForeignKey, Integer, String, Table, Text,
                         create_engine)
 from sqlalchemy.ext.declarative import declarative_base
+from urllib.parse import quote
+from bs4 import BeautifulSoup
+from openai import OpenAI
 
 Base = declarative_base()
 
-
+# ==================== Database Models ====================
 user_news_association_table = Table(
     "user_news_upvotes",
     Base.metadata,
     Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
-    Column(
-        "news_articles_id", Integer, ForeignKey("news_articles.id"), primary_key=True
-    ),
+    Column("news_articles_id", Integer, ForeignKey("news_articles.id"), primary_key=True),
 )
-
-# from pydantic import BaseModel
 
 
 class User(Base):
@@ -60,466 +58,525 @@ class NewsArticle(Base):
     )
 
 
-db_engine = create_engine("sqlite:///news_database.db", echo=True)
-
-Base.metadata.create_all(db_engine)
-
-Session = sessionmaker(bind=db_engine)
-
-sentry_sdk.init(
-    dsn="https://4001ffe917ccb261aa0e0c34026dc343@o4505702629834752.ingest.us.sentry.io/4507694792704000",
-    traces_sample_rate=1.0,
-    profiles_sample_rate=1.0,
-)
-
-app = FastAPI()
-background_scheduler = BackgroundScheduler()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-
-app.add_middleware(
-    CORSMiddleware,  # noqa
-    allow_origins=["http://localhost:8080"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-import os
-from openai import OpenAI
-
-
-# def generate_summary(content):
-#     m = [
-#         {
-#             "role": "system",
-#             "content": "你是一個新聞摘要生成機器人，請統整新聞中提及的影響及主要原因 (影響、原因各50個字，請以json格式回答 {'影響': '...', '原因': '...'})",
-#         },
-#         {"role": "user", "content": f"{content}"},
-#     ]
-#
-#     completion = OpenAI(api_key="xxx").chat.completions.create(
-#         model="gpt-3.5-turbo",
-#         messages=m,
-#     )
-#     return completion.choices[0].message.content
-
-#
-# def extract_search_keywords(content):
-#     m = [
-#         {
-#             "role": "system",
-#             "content": "你是一個關鍵字提取機器人，用戶將會輸入一段文字，表示其希望看見的新聞內容，請提取出用戶希望看見的關鍵字，請截取最重要的關鍵字即可，避免出現「新聞」、「資訊」等混淆搜尋引擎的字詞。(僅須回答關鍵字，若有多個關鍵字，請以空格分隔)",
-#         },
-#         {"role": "user", "content": f"{content}"},
-#     ]
-#
-#     completion = OpenAI(api_key="xxx").chat.completions.create(
-#         model="gpt-3.5-turbo",
-#         messages=m,
-#     )
-#     return completion.choices[0].message.content
-
-
-from urllib.parse import quote
-import requests
-from bs4 import BeautifulSoup
-from sqlalchemy.orm import Session
-
-
-def add_news_article(news_data):
-    """
-    add new to db
-    :param news_data: news info
-    :return:
-    """
-    session = Session()
-    session.add(NewsArticle(
-        url=news_data["url"],
-        title=news_data["title"],
-        time=news_data["time"],
-        content=" ".join(news_data["content"]),  # 將內容list轉換為字串
-        summary=news_data["summary"],
-        reason=news_data["reason"],
-    ))
-    session.commit()
-    session.close()
-
-
-def fetch_news_info(search_term, is_initial=False):
-    """
-    get new
-
-    :param search_term:
-    :param is_initial:
-    :return:
-    """
-    all_news_data = []
-    # iterate pages to get more news data, not actually get all news data
-    if is_initial:
-        news_datas = []
-        for page in range(1, 10):
-            p2 = {
-                "page": page,
-                "id": f"search:{quote(search_term)}",
-                "channelId": 2,
-                "type": "searchword",
-            }
-            response = requests.get("https://udn.com/api/more", params=p2)
-            news_datas.append(response.json()["lists"])
-
-        for data in news_datas:
-            all_news_data.append(data)
-    else:
-        page = {
-            "page": 1,
-            "id": f"search:{quote(search_term)}",
-            "channelId": 2,
-            "type": "searchword",
-        }
-        response = requests.get("https://udn.com/api/more", params=page)
-
-        all_news_data = response.json()["lists"]
-    return all_news_data
-
-def fetch_initial_news(is_initial=False):
-    """
-    get new info
-
-    :param is_initial:
-    :return:
-    """
-    news_data = fetch_news_info("價格", is_initial=is_initial)
-    for news in news_data:
-        title = news["title"]
-        chat_messages = [
-            {
-                "role": "system",
-                "content": "你是一個關聯度評估機器人，請評估新聞標題是否與「民生用品的價格變化」相關，並給予'high'、'medium'、'low'評價。(僅需回答'high'、'medium'、'low'三個詞之一)",
-            },
-            {"role": "user", "content": f"{title}"},
-        ]
-        ai_response = OpenAI(api_key="xxx").chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=chat_messages,
-        )
-        relevance = ai_response.choices[0].message.content
-        if relevance == "high":
-            response = requests.get(news["titleLink"])
-            soup = BeautifulSoup(response.text, "html.parser")
-            # 標題
-            title = soup.find("h1", class_="article-content__title").text
-            time = soup.find("time", class_="article-content__time").text
-            # 定位到包含文章内容的 <section>
-            content_section = soup.find("section", class_="article-content__editor")
-
-            paragraphs = [
-                page.text
-                for page in content_section.find_all("page")
-                if page.text.strip() != "" and "▪" not in page.text
-            ]
-            detailed_news =  {
-                "url": news["titleLink"],
-                "title": title,
-                "time": time,
-                "content": paragraphs,
-            }
-            ai_prompt_messages = [
-                {
-                    "role": "system",
-                    "content": "你是一個新聞摘要生成機器人，請統整新聞中提及的影響及主要原因 (影響、原因各50個字，請以json格式回答 {'影響': '...', '原因': '...'})",
-                },
-                {"role": "user", "content": " ".join(detailed_news["content"])},
-            ]
-
-            completion = OpenAI(api_key="xxx").chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=ai_prompt_messages,
-            )
-            result = completion.choices[0].message.content
-            result = json.loads(result)
-            detailed_news["summary"] = result["影響"]
-            detailed_news["reason"] = result["原因"]
-            add_news_article(detailed_news)
-
-
-@app.on_event("startup")
-def start_scheduler():
-    db = SessionLocal()
-    if db.query(NewsArticle).count() == 0:
-        # should change into simple factory pattern
-        fetch_initial_news()
-    db.close()
-    background_scheduler.add_job(fetch_initial_news, "interval", minutes=100)
-    background_scheduler.start()
-
-
-@app.on_event("shutdown") 
-def shutdown_scheduler():
-    background_scheduler.shutdown()
-
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/users/login")
-
-
-def session_opener():
-    session = Session(bind=db_engine)
-    try:
-        yield session
-    finally:
-        session.close()
-
-
-
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify_password(plain_password, hashed_password)
-
-
-def check_user_password_is_correct(db, username, pwd):
-    password_data = db.query(User).filter(User.username == username).first()
-    if not verify_password(pwd, password_data.hashed_password):
-        return False
-    return password_data
-
-
-def authenticate_user_token(
-    token = Depends(oauth2_scheme),
-    db = Depends(session_opener)
-):
-    payload = jwt.decode(token, '1892dhianiandowqd0n', algorithms=["HS256"])
-    return db.query(User).filter(User.username == payload.get("sub")).first()
-
-
-def create_access_token(data, expires_delta=None):
-    """create access token"""
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    print(to_encode)
-    encoded_jwt = jwt.encode(to_encode, '1892dhianiandowqd0n', algorithm="HS256")
-    return encoded_jwt
-
-
-@app.post("/api/v1/users/login")
-async def login_for_access_token(
-        form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(session_opener)
-):
-    """login"""
-    user = check_user_password_is_correct(db, form_data.username, form_data.password)
-    access_token = create_access_token(
-        data={"sub": str(user.username)}, expires_delta=timedelta(minutes=30)
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
-
+# ==================== Pydantic Schemas ====================
 class UserAuthSchema(BaseModel):
     username: str
     password: str
-@app.post("/api/v1/users/register")
-def create_user(user: UserAuthSchema, db: Session = Depends(session_opener)):
-    """create user"""
-    hashed_password = pwd_context.hash(user.password)
-    db_user = User(username=user.username, hashed_password=hashed_password)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
 
-
-@app.get("/api/v1/users/me")
-def read_users_me(user=Depends(authenticate_user_token)):
-    return {"username": user.username}
-
-
-_id_counter = itertools.count(start=1000000)
-
-
-def get_article_upvote_details(article_id, user_id, db):
-    cnt = (
-        db.query(user_news_association_table)
-        .filter_by(news_articles_id=article_id)
-        .count()
-    )
-    voted = False
-    if user_id:
-        voted = (
-                db.query(user_news_association_table)
-                .filter_by(news_articles_id=article_id, user_id=user_id)
-                .first()
-                is not None
-        )
-    return cnt, voted
-
-
-@app.get("/api/v1/news/news")
-def read_all_news(db=Depends(session_opener)):
-    """
-    read new
-
-    :param db:
-    :return:
-    """
-    news = db.query(NewsArticle).order_by(NewsArticle.time.desc()).all()
-    result = []
-    for n in news:
-        upvotes, upvoted = get_article_upvote_details(n.id, None, db)
-        result.append(
-            {**n.__dict__, "upvotes": upvotes, "is_upvoted": upvoted}
-        )
-    return result
-
-
-@app.get(
-    "/api/v1/news/user_news"
-)
-def read_user_news(
-        db=Depends(session_opener),
-        current_user=Depends(authenticate_user_token)
-):
-    """
-    read user new
-
-    :param db:
-    :param current_user:
-    :return:
-    """
-    news = db.query(NewsArticle).order_by(NewsArticle.time.desc()).all()
-    result = []
-    for article in news:
-        upvotes, upvoted = get_article_upvote_details(article.id, current_user.id, db)
-        result.append(
-            {
-                **article.__dict__,
-                "upvotes": upvotes,
-                "is_upvoted": upvoted,
-            }
-        )
-    return result
 
 class PromptRequest(BaseModel):
     prompt: str
 
-@app.post("/api/v1/news/search_news")
-async def search_news(request: PromptRequest):
-    prompt = request.prompt
-    news_list = []
-    ai_prompt_messages = [
-        {
-            "role": "system",
-            "content": "你是一個關鍵字提取機器人，用戶將會輸入一段文字，表示其希望看見的新聞內容，請提取出用戶希望看見的關鍵字，請截取最重要的關鍵字即可，避免出現「新聞」、「資訊」等混淆搜尋引擎的字詞。(僅須回答關鍵字，若有多個關鍵字，請以空格分隔)",
-        },
-        {"role": "user", "content": f"{prompt}"},
-    ]
-
-    completion = OpenAI(api_key="xxx").chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=ai_prompt_messages,
-    )
-    keywords = completion.choices[0].message.content
-    # should change into simple factory pattern
-    news_items = fetch_news_info(keywords, is_initial=False)
-    for news in news_items:
-        try:
-            response = requests.get(news["titleLink"])
-            soup = BeautifulSoup(response.text, "html.parser")
-            # 標題
-            title = soup.find("h1", class_="article-content__title").text
-            time = soup.find("time", class_="article-content__time").text
-            # 定位到包含文章内容的 <section>
-            content_section = soup.find("section", class_="article-content__editor")
-
-            paragraphs = [
-                page.text
-                for page in content_section.find_all("page")
-                if page.text.strip() != "" and "▪" not in page.text
-            ]
-            detailed_news = {
-                "url": news["titleLink"],
-                "title": title,
-                "time": time,
-                "content": paragraphs,
-            }
-            detailed_news["content"] = " ".join(detailed_news["content"])
-            detailed_news["id"] = next(_id_counter)
-            news_list.append(detailed_news)
-        except Exception as e:
-            print(e)
-    return sorted(news_list, key=lambda x: x["time"], reverse=True)
 
 class NewsSummaryRequestSchema(BaseModel):
     content: str
 
-@app.post("/api/v1/news/news_summary")
-async def news_summary(
-        payload: NewsSummaryRequestSchema, current_user=Depends(authenticate_user_token)
-):
-    response = {}
-    ai_prompt_messages = [
-        {
-            "role": "system",
-            "content": "你是一個新聞摘要生成機器人，請統整新聞中提及的影響及主要原因 (影響、原因各50個字，請以json格式回答 {'影響': '...', '原因': '...'})",
-        },
-        {"role": "user", "content": f"{payload.content}"},
-    ]
 
-    completion = OpenAI(api_key="xxx").chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=ai_prompt_messages,
-    )
-    result = completion.choices[0].message.content
-    if result:
-        result = json.loads(result)
-        response["summary"] = result["影響"]
-        response["reason"] = result["原因"]
-    return response
+# ==================== Configuration ====================
+class Config:
+    DATABASE_URL = "sqlite:///news_database.db"
+    SENTRY_DSN = "https://4001ffe917ccb261aa0e0c34026dc343@o4505702629834752.ingest.us.sentry.io/4507694792704000"
+    JWT_SECRET = "1892dhianiandowqd0n"
+    JWT_ALGORITHM = "HS256"
+    OPENAI_API_KEY = "xxx"
+    CORS_ORIGINS = ["http://localhost:8080"]
 
 
-@app.post("/api/v1/news/{id}/upvote")
-def upvote_article(
-        id,
-        db=Depends(session_opener),
-        current_user=Depends(authenticate_user_token),
-):
-    message = toggle_upvote(id, current_user.id, db)
-    return {"message": message}
+# ==================== Database Manager ====================
+class DatabaseManager:
+    def __init__(self, database_url: str):
+        self.engine = create_engine(database_url, echo=True)
+        Base.metadata.create_all(self.engine)
+        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+    
+    def get_session(self):
+        session = self.SessionLocal()
+        try:
+            yield session
+        finally:
+            session.close()
 
 
-def toggle_upvote(article_id, user_id, db):
-    existing_upvote = db.execute(
-        select(user_news_association_table).where(
-            user_news_association_table.c.news_articles_id == article_id,
-            user_news_association_table.c.user_id == user_id,
+# ==================== AI Service ====================
+class AIService:
+    def __init__(self, api_key: str):
+        self.client = OpenAI(api_key=api_key)
+    
+    def generate_summary(self, content: str) -> dict:
+        """Generate news summary with impact and reason"""
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一個新聞摘要生成機器人,請統整新聞中提及的影響及主要原因 (影響、原因各50個字,請以json格式回答 {'影響': '...', '原因': '...'})",
+            },
+            {"role": "user", "content": content},
+        ]
+        
+        completion = self.client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
         )
-    ).scalar()
-
-    if existing_upvote:
-        delete_stmt = delete(user_news_association_table).where(
-            user_news_association_table.c.news_articles_id == article_id,
-            user_news_association_table.c.user_id == user_id,
+        result = completion.choices[0].message.content
+        return json.loads(result)
+    
+    def extract_keywords(self, prompt: str) -> str:
+        """Extract search keywords from user prompt"""
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一個關鍵字提取機器人,用戶將會輸入一段文字,表示其希望看見的新聞內容,請提取出用戶希望看見的關鍵字,請截取最重要的關鍵字即可,避免出現「新聞」、「資訊」等混淆搜尋引擎的字詞。(僅須回答關鍵字,若有多個關鍵字,請以空格分隔)",
+            },
+            {"role": "user", "content": prompt},
+        ]
+        
+        completion = self.client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
         )
-        db.execute(delete_stmt)
-        db.commit()
-        return "Upvote removed"
-    else:
-        insert_stmt = insert(user_news_association_table).values(
-            news_articles_id=article_id, user_id=user_id
+        return completion.choices[0].message.content
+    
+    def evaluate_relevance(self, title: str) -> str:
+        """Evaluate news relevance to price changes"""
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一個關聯度評估機器人,請評估新聞標題是否與「民生用品的價格變化」相關,並給予'high'、'medium'、'low'評價。(僅需回答'high'、'medium'、'low'三個詞之一)",
+            },
+            {"role": "user", "content": title},
+        ]
+        
+        completion = self.client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
         )
-        db.execute(insert_stmt)
-        db.commit()
-        return "Article upvoted"
+        return completion.choices[0].message.content
 
 
-def news_exists(article_id, db: Session):
-    return db.query(NewsArticle).filter_by(id=article_id).first() is not None
+# ==================== News Scraper ====================
+class NewsScraper:
+    BASE_URL = "https://udn.com/api/more"
+    
+    @staticmethod
+    def fetch_news_list(search_term: str, is_initial: bool = False) -> list:
+        """Fetch news list from UDN API"""
+        all_news_data = []
+        
+        if is_initial:
+            for page in range(1, 10):
+                params = {
+                    "page": page,
+                    "id": f"search:{quote(search_term)}",
+                    "channelId": 2,
+                    "type": "searchword",
+                }
+                response = requests.get(NewsScraper.BASE_URL, params=params)
+                all_news_data.extend(response.json()["lists"])
+        else:
+            params = {
+                "page": 1,
+                "id": f"search:{quote(search_term)}",
+                "channelId": 2,
+                "type": "searchword",
+            }
+            response = requests.get(NewsScraper.BASE_URL, params=params)
+            all_news_data = response.json()["lists"]
+        
+        return all_news_data
+    
+    @staticmethod
+    def fetch_article_content(url: str) -> dict:
+        """Fetch detailed article content from URL"""
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, "html.parser")
+        
+        title = soup.find("h1", class_="article-content__title").text
+        time = soup.find("time", class_="article-content__time").text
+        content_section = soup.find("section", class_="article-content__editor")
+        
+        paragraphs = [
+            page.text
+            for page in content_section.find_all("page")
+            if page.text.strip() != "" and "▪" not in page.text
+        ]
+        
+        return {
+            "url": url,
+            "title": title,
+            "time": time,
+            "content": paragraphs,
+        }
 
 
-@app.get("/api/v1/prices/necessities-price")
-def get_necessities_prices(
-        category=Query(None), commodity=Query(None)
-):
-    return requests.get(
-        "https://opendata.ey.gov.tw/api/ConsumerProtection/NecessitiesPrice",
-        params={"CategoryName": category, "Name": commodity},
-    ).json()
+# ==================== News Repository ====================
+class NewsRepository:
+    def __init__(self, db: Session):
+        self.db = db
+    
+    def add_article(self, news_data: dict):
+        """Add news article to database"""
+        article = NewsArticle(
+            url=news_data["url"],
+            title=news_data["title"],
+            time=news_data["time"],
+            content=" ".join(news_data["content"]) if isinstance(news_data["content"], list) else news_data["content"],
+            summary=news_data["summary"],
+            reason=news_data["reason"],
+        )
+        self.db.add(article)
+        self.db.commit()
+    
+    def get_all_articles(self) -> List[NewsArticle]:
+        """Get all articles ordered by time"""
+        return self.db.query(NewsArticle).order_by(NewsArticle.time.desc()).all()
+    
+    def get_article_by_id(self, article_id: int) -> Optional[NewsArticle]:
+        """Get article by ID"""
+        return self.db.query(NewsArticle).filter_by(id=article_id).first()
+    
+    def article_exists(self, article_id: int) -> bool:
+        """Check if article exists"""
+        return self.get_article_by_id(article_id) is not None
+    
+    def count_articles(self) -> int:
+        """Count total articles"""
+        return self.db.query(NewsArticle).count()
+
+
+# ==================== User Repository ====================
+class UserRepository:
+    def __init__(self, db: Session):
+        self.db = db
+    
+    def create_user(self, username: str, hashed_password: str) -> User:
+        """Create new user"""
+        user = User(username=username, hashed_password=hashed_password)
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+    
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        """Get user by username"""
+        return self.db.query(User).filter(User.username == username).first()
+
+
+# ==================== Upvote Service ====================
+class UpvoteService:
+    def __init__(self, db: Session):
+        self.db = db
+    
+    def get_upvote_details(self, article_id: int, user_id: Optional[int] = None) -> tuple:
+        """Get upvote count and user's upvote status"""
+        count = (
+            self.db.query(user_news_association_table)
+            .filter_by(news_articles_id=article_id)
+            .count()
+        )
+        
+        voted = False
+        if user_id:
+            voted = (
+                self.db.query(user_news_association_table)
+                .filter_by(news_articles_id=article_id, user_id=user_id)
+                .first()
+                is not None
+            )
+        
+        return count, voted
+    
+    def toggle_upvote(self, article_id: int, user_id: int) -> str:
+        """Toggle upvote for an article"""
+        existing_upvote = self.db.execute(
+            select(user_news_association_table).where(
+                user_news_association_table.c.news_articles_id == article_id,
+                user_news_association_table.c.user_id == user_id,
+            )
+        ).scalar()
+        
+        if existing_upvote:
+            delete_stmt = delete(user_news_association_table).where(
+                user_news_association_table.c.news_articles_id == article_id,
+                user_news_association_table.c.user_id == user_id,
+            )
+            self.db.execute(delete_stmt)
+            self.db.commit()
+            return "Upvote removed"
+        else:
+            insert_stmt = insert(user_news_association_table).values(
+                news_articles_id=article_id, user_id=user_id
+            )
+            self.db.execute(insert_stmt)
+            self.db.commit()
+            return "Article upvoted"
+
+
+# ==================== Authentication Service ====================
+class AuthService:
+    def __init__(self, secret_key: str, algorithm: str):
+        self.secret_key = secret_key
+        self.algorithm = algorithm
+        self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        self.oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/users/login")
+    
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        """Verify password"""
+        return self.pwd_context.verify(plain_password, hashed_password)
+    
+    def hash_password(self, password: str) -> str:
+        """Hash password"""
+        return self.pwd_context.hash(password)
+    
+    def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+        """Create JWT access token"""
+        to_encode = data.copy()
+        if expires_delta:
+            expire = datetime.utcnow() + expires_delta
+        else:
+            expire = datetime.utcnow() + timedelta(minutes=15)
+        to_encode.update({"exp": expire})
+        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
+        return encoded_jwt
+    
+    def decode_token(self, token: str) -> dict:
+        """Decode JWT token"""
+        return jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+    
+    def authenticate_user(self, db: Session, username: str, password: str) -> Optional[User]:
+        """Authenticate user with username and password"""
+        user_repo = UserRepository(db)
+        user = user_repo.get_user_by_username(username)
+        if not user or not self.verify_password(password, user.hashed_password):
+            return None
+        return user
+
+
+# ==================== News Service ====================
+class NewsService:
+    def __init__(self, ai_service: AIService, scraper: NewsScraper):
+        self.ai_service = ai_service
+        self.scraper = scraper
+        self._id_counter = itertools.count(start=1000000)
+    
+    def fetch_and_process_initial_news(self, db: Session, is_initial: bool = False):
+        """Fetch and process initial news about prices"""
+        news_repo = NewsRepository(db)
+        news_list = self.scraper.fetch_news_list("價格", is_initial=is_initial)
+        
+        for news in news_list:
+            title = news["title"]
+            relevance = self.ai_service.evaluate_relevance(title)
+            
+            if relevance == "high":
+                try:
+                    detailed_news = self.scraper.fetch_article_content(news["titleLink"])
+                    content_text = " ".join(detailed_news["content"])
+                    
+                    summary_result = self.ai_service.generate_summary(content_text)
+                    detailed_news["summary"] = summary_result["影響"]
+                    detailed_news["reason"] = summary_result["原因"]
+                    
+                    news_repo.add_article(detailed_news)
+                except Exception as e:
+                    print(f"Error processing news: {e}")
+    
+    def search_news(self, prompt: str) -> list:
+        """Search news based on user prompt"""
+        keywords = self.ai_service.extract_keywords(prompt)
+        news_items = self.scraper.fetch_news_list(keywords, is_initial=False)
+        news_list = []
+        
+        for news in news_items:
+            try:
+                detailed_news = self.scraper.fetch_article_content(news["titleLink"])
+                detailed_news["content"] = " ".join(detailed_news["content"])
+                detailed_news["id"] = next(self._id_counter)
+                news_list.append(detailed_news)
+            except Exception as e:
+                print(f"Error fetching news: {e}")
+        
+        return sorted(news_list, key=lambda x: x["time"], reverse=True)
+    
+    def generate_news_summary(self, content: str) -> dict:
+        """Generate summary for news content"""
+        result = self.ai_service.generate_summary(content)
+        return {
+            "summary": result["影響"],
+            "reason": result["原因"]
+        }
+
+
+# ==================== Application Factory ====================
+class NewsApplication:
+    def __init__(self, config: Config):
+        self.config = config
+        self.app = FastAPI()
+        self.db_manager = DatabaseManager(config.DATABASE_URL)
+        self.auth_service = AuthService(config.JWT_SECRET, config.JWT_ALGORITHM)
+        self.ai_service = AIService(config.OPENAI_API_KEY)
+        self.news_service = NewsService(self.ai_service, NewsScraper())
+        self.scheduler = BackgroundScheduler()
+        
+        self._setup_sentry()
+        self._setup_middleware()
+        self._setup_routes()
+        self._setup_events()
+    
+    def _setup_sentry(self):
+        """Setup Sentry monitoring"""
+        sentry_sdk.init(
+            dsn=self.config.SENTRY_DSN,
+            traces_sample_rate=1.0,
+            profiles_sample_rate=1.0,
+        )
+    
+    def _setup_middleware(self):
+        """Setup CORS middleware"""
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=self.config.CORS_ORIGINS,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    
+    def _get_current_user(self, token: str = Depends(None), db: Session = Depends(None)):
+        """Dependency to get current authenticated user"""
+        if token is None:
+            token = Depends(self.auth_service.oauth2_scheme)
+        if db is None:
+            db = Depends(self.db_manager.get_session)
+        
+        payload = self.auth_service.decode_token(token)
+        user_repo = UserRepository(db)
+        return user_repo.get_user_by_username(payload.get("sub"))
+    
+    def _setup_routes(self):
+        """Setup all API routes"""
+        
+        @self.app.post("/api/v1/users/register")
+        def register(user: UserAuthSchema, db: Session = Depends(self.db_manager.get_session)):
+            user_repo = UserRepository(db)
+            hashed_password = self.auth_service.hash_password(user.password)
+            return user_repo.create_user(user.username, hashed_password)
+        
+        @self.app.post("/api/v1/users/login")
+        def login(
+            form_data: OAuth2PasswordRequestForm = Depends(),
+            db: Session = Depends(self.db_manager.get_session)
+        ):
+            user = self.auth_service.authenticate_user(db, form_data.username, form_data.password)
+            if not user:
+                raise HTTPException(status_code=401, detail="Incorrect username or password")
+            
+            access_token = self.auth_service.create_access_token(
+                data={"sub": user.username},
+                expires_delta=timedelta(minutes=30)
+            )
+            return {"access_token": access_token, "token_type": "bearer"}
+        
+        @self.app.get("/api/v1/users/me")
+        def read_users_me(
+            token: str = Depends(self.auth_service.oauth2_scheme),
+            db: Session = Depends(self.db_manager.get_session)
+        ):
+            payload = self.auth_service.decode_token(token)
+            user_repo = UserRepository(db)
+            user = user_repo.get_user_by_username(payload.get("sub"))
+            return {"username": user.username}
+        
+        @self.app.get("/api/v1/news/news")
+        def read_all_news(db: Session = Depends(self.db_manager.get_session)):
+            news_repo = NewsRepository(db)
+            upvote_service = UpvoteService(db)
+            articles = news_repo.get_all_articles()
+            
+            result = []
+            for article in articles:
+                upvotes, upvoted = upvote_service.get_upvote_details(article.id)
+                result.append({**article.__dict__, "upvotes": upvotes, "is_upvoted": upvoted})
+            return result
+        
+        @self.app.get("/api/v1/news/user_news")
+        def read_user_news(
+            db: Session = Depends(self.db_manager.get_session),
+            token: str = Depends(self.auth_service.oauth2_scheme)
+        ):
+            payload = self.auth_service.decode_token(token)
+            user_repo = UserRepository(db)
+            current_user = user_repo.get_user_by_username(payload.get("sub"))
+            
+            news_repo = NewsRepository(db)
+            upvote_service = UpvoteService(db)
+            articles = news_repo.get_all_articles()
+            
+            result = []
+            for article in articles:
+                upvotes, upvoted = upvote_service.get_upvote_details(article.id, current_user.id)
+                result.append({**article.__dict__, "upvotes": upvotes, "is_upvoted": upvoted})
+            return result
+        
+        @self.app.post("/api/v1/news/search_news")
+        def search_news(request: PromptRequest):
+            return self.news_service.search_news(request.prompt)
+        
+        @self.app.post("/api/v1/news/news_summary")
+        def news_summary(
+            payload: NewsSummaryRequestSchema,
+            token: str = Depends(self.auth_service.oauth2_scheme)
+        ):
+            return self.news_service.generate_news_summary(payload.content)
+        
+        @self.app.post("/api/v1/news/{id}/upvote")
+        def upvote_article(
+            id: int,
+            db: Session = Depends(self.db_manager.get_session),
+            token: str = Depends(self.auth_service.oauth2_scheme)
+        ):
+            payload = self.auth_service.decode_token(token)
+            user_repo = UserRepository(db)
+            current_user = user_repo.get_user_by_username(payload.get("sub"))
+            
+            upvote_service = UpvoteService(db)
+            message = upvote_service.toggle_upvote(id, current_user.id)
+            return {"message": message}
+        
+        @self.app.get("/api/v1/prices/necessities-price")
+        def get_necessities_prices(category: str = Query(None), commodity: str = Query(None)):
+            return requests.get(
+                "https://opendata.ey.gov.tw/api/ConsumerProtection/NecessitiesPrice",
+                params={"CategoryName": category, "Name": commodity},
+            ).json()
+    
+    def _setup_events(self):
+        """Setup startup and shutdown events"""
+        
+        @self.app.on_event("startup")
+        def start_scheduler():
+            db = next(self.db_manager.get_session())
+            news_repo = NewsRepository(db)
+            
+            if news_repo.count_articles() == 0:
+                self.news_service.fetch_and_process_initial_news(db, is_initial=True)
+            
+            self.scheduler.add_job(
+                lambda: self.news_service.fetch_and_process_initial_news(
+                    next(self.db_manager.get_session())
+                ),
+                "interval",
+                minutes=100
+            )
+            self.scheduler.start()
+        
+        @self.app.on_event("shutdown")
+        def shutdown_scheduler():
+            self.scheduler.shutdown()
+    
+    def get_app(self):
+        """Get FastAPI application instance"""
+        return self.app
+
+
+# ==================== Application Entry Point ====================
+config = Config()
+news_app = NewsApplication(config)
+app = news_app.get_app()
