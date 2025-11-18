@@ -17,6 +17,7 @@ jobs:
     
     # 步驟 1：【關鍵修復】設定環境變數
     # 告訴 setup-python 我們的工具快取路徑，以修復 Permission denied
+    # (請確認你的 actions-runner 資料夾路徑是這個)
     env:
       RUNNER_TOOL_CACHE: /Users/cecill/Documents/actions-runner/_work/_tool
 
