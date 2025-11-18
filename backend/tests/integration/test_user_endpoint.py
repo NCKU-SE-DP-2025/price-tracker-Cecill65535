@@ -2,10 +2,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, StaticPool
 from sqlalchemy.orm import sessionmaker
-from main import app
-from main import Base, User, session_opener
+from src.main import app
+# from src.main import Base, session_opener
+from src.database import Base, SessionLocal as session_opener
+from src.auth.models import User
 from jose import jwt
-from main import pwd_context
+# from src.main import pwd_context
+from src.auth.dependencies import auth_service
 
 SECRET_KEY = "1892dhianiandowqd0n"
 ALGORITHM = "HS256"
@@ -17,6 +20,7 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 Base.metadata.create_all(bind=engine)
 
+pwd_context = auth_service.pwd_context
 
 def override_session_opener():
     try:
