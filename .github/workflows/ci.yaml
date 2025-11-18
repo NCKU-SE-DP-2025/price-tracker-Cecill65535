@@ -18,7 +18,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 步驟 1：下載 Standalone Python
+      # 步驟 1：下載並取得 Python 的「絕對路徑」
       - name: Setup Portable Python 3.12
         run: |
           echo "Downloading Standalone Python 3.12 (aarch64)..."
@@ -28,26 +28,27 @@ jobs:
           mkdir -p python_env
           tar -xzf python.tar.gz -C python_env
           
-          # 【關鍵修復】
-          # 1. 使用 -path "*/bin/python3" 來精確定位
-          # 2. 拿掉 -type f (因為它可能是捷徑)
-          PYTHON_BIN=$(find python_env -path "*/bin/python3" | head -n 1)
+          # 找出相對路徑
+          REL_PATH=$(find python_env -path "*/bin/python3" | head -n 1)
           
-          if [ -z "$PYTHON_BIN" ]; then
+          if [ -z "$REL_PATH" ]; then
             echo "❌ Error: Python binary not found!"
-            # 列出所有檔案幫助除錯 (雖然這次應該不會失敗了)
             find python_env
             exit 1
           fi
-          
-          echo "✅ Found Python at: $PYTHON_BIN"
-          
-          # 確保它是可執行的 (以防萬一)
-          chmod +x "$PYTHON_BIN"
-          
-          echo "PYTHON_EXE=$PYTHON_BIN" >> $GITHUB_ENV
 
-      # 步驟 2：使用找到的 Python 安裝套件
+          # 【關鍵修復】加上 $(pwd) 變成絕對路徑
+          # 這樣就算等一下 cd backend 也不會找不到
+          ABS_PATH="$(pwd)/$REL_PATH"
+          
+          echo "✅ Found Python at: $ABS_PATH"
+          
+          # 確保它是可執行的
+          chmod +x "$ABS_PATH"
+          
+          echo "PYTHON_EXE=$ABS_PATH" >> $GITHUB_ENV
+
+      # 步驟 2：安裝套件 (這一步你剛剛已經成功了)
       - name: Install dependencies
         run: |
           echo "Using Python: $PYTHON_EXE"
@@ -63,6 +64,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           cd backend
+          # 因為 $PYTHON_EXE 現在是絕對路徑，所以在 backend 裡面也找得到！
           "$PYTHON_EXE" -m pytest tests/integration --cov=src --cov-report=xml --disable-warnings
 
       - name: Upload coverage report
