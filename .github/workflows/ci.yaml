@@ -18,36 +18,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 步驟 1：下載並解壓，然後「自動搜尋」Python 執行檔位置
+      # 步驟 1：下載「真正的」免安裝 Python 3.12 (來自 indygreg/python-build-standalone)
       - name: Setup Portable Python 3.12
         run: |
-          echo "Downloading portable Python 3.12..."
-          curl -L "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-darwin-arm64.tar.gz" -o python.tar.gz
+          echo "Downloading Standalone Python 3.12 (aarch64)..."
+          # 這是專門給 Apple Silicon (M1/M2/M3) 的免安裝版
+          curl -L "https://github.com/indygreg/python-build-standalone/releases/download/20241016/cpython-3.12.7+20241016-aarch64-apple-darwin-install_only.tar.gz" -o python.tar.gz
           
           echo "Extracting..."
           mkdir -p python_env
+          # 這個壓縮檔解壓後會是一個 'python' 資料夾，裡面直接有 bin/python3
           tar -xzf python.tar.gz -C python_env
           
-          # 【關鍵修復】不要用猜的，直接用 find 指令找出 python3 在哪裡
-          # 這行會找出 python_env 底下所有的 python3 檔案，並取第一個
-          PYTHON_BIN=$(find python_env -name "python3" -type f | head -n 1)
+          # 自動找出 python3 執行檔的位置
+          PYTHON_BIN=$(find python_env -name "python3" -type f | grep "/bin/python3$" | head -n 1)
           
           if [ -z "$PYTHON_BIN" ]; then
-            echo "❌ Error: Could not find python3 binary in extracted folder!"
-            # 如果找不到，列出檔案結構幫忙除錯
+            echo "❌ Error: Still could not find python3 binary!"
             find python_env
             exit 1
           fi
           
           echo "✅ Found Python at: $PYTHON_BIN"
-          
-          # 將這個路徑寫入 GitHub Environment 變數，讓後面的步驟可以直接用 $PYTHON_EXE 呼叫
           echo "PYTHON_EXE=$PYTHON_BIN" >> $GITHUB_ENV
 
       # 步驟 2：使用找到的 Python 安裝套件
       - name: Install dependencies
         run: |
-          # 使用我們剛剛抓到的 $PYTHON_EXE 變數
           echo "Using Python: $PYTHON_EXE"
           
           "$PYTHON_EXE" -m pip install --upgrade pip
@@ -61,7 +58,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           cd backend
-          # 同樣使用 $PYTHON_EXE
           "$PYTHON_EXE" -m pytest tests/integration --cov=src --cov-report=xml --disable-warnings
 
       - name: Upload coverage report
