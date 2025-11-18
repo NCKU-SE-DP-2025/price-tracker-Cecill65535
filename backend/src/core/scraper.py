@@ -43,7 +43,7 @@ class NewsScraper:
         
         paragraphs = [
             page.text
-            for page in content_section.find_all("page")
+            for page in content_section.find_all("p")
             if page.text.strip() != "" and "▪" not in page.text
         ]
         
