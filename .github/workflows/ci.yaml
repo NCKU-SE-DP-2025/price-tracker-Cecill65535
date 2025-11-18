@@ -18,28 +18,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 步驟 1：下載「真正的」免安裝 Python 3.12 (來自 indygreg/python-build-standalone)
+      # 步驟 1：下載 Standalone Python
       - name: Setup Portable Python 3.12
         run: |
           echo "Downloading Standalone Python 3.12 (aarch64)..."
-          # 這是專門給 Apple Silicon (M1/M2/M3) 的免安裝版
           curl -L "https://github.com/indygreg/python-build-standalone/releases/download/20241016/cpython-3.12.7+20241016-aarch64-apple-darwin-install_only.tar.gz" -o python.tar.gz
           
           echo "Extracting..."
           mkdir -p python_env
-          # 這個壓縮檔解壓後會是一個 'python' 資料夾，裡面直接有 bin/python3
           tar -xzf python.tar.gz -C python_env
           
-          # 自動找出 python3 執行檔的位置
-          PYTHON_BIN=$(find python_env -name "python3" -type f | grep "/bin/python3$" | head -n 1)
+          # 【關鍵修復】
+          # 1. 使用 -path "*/bin/python3" 來精確定位
+          # 2. 拿掉 -type f (因為它可能是捷徑)
+          PYTHON_BIN=$(find python_env -path "*/bin/python3" | head -n 1)
           
           if [ -z "$PYTHON_BIN" ]; then
-            echo "❌ Error: Still could not find python3 binary!"
+            echo "❌ Error: Python binary not found!"
+            # 列出所有檔案幫助除錯 (雖然這次應該不會失敗了)
             find python_env
             exit 1
           fi
           
           echo "✅ Found Python at: $PYTHON_BIN"
+          
+          # 確保它是可執行的 (以防萬一)
+          chmod +x "$PYTHON_BIN"
+          
           echo "PYTHON_EXE=$PYTHON_BIN" >> $GITHUB_ENV
 
       # 步驟 2：使用找到的 Python 安裝套件
