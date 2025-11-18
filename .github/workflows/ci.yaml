@@ -19,45 +19,35 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 步驟 1：【關鍵修復】
-      # 刪除 'Set up Python' 步驟，改用下面的「手動安裝」
-      
+      # 這一整步是完全正確的，不要動
       - name: Manually install Python 3.12
         run: |
           echo "Installing Python 3.12 manually..."
-          
-          # 1. 下載日誌中顯示的 Python 3.12 版本
           curl -L "https://github.com/actions/python-versions/releases/download/3.12.10-14343898437/python-3.12.10-darwin-arm64.tar.gz" -o python.tar.gz
-          
-          # 2. 建立一個 *我們有權限* 的資料夾來存放它
-          # (RUNNER_TOOL_CACHE 是 runner 預設的快取路徑，絕對安全)
           mkdir -p $RUNNER_TOOL_CACHE/python
-          
-          # 3. 解壓縮到那個資料夾
           tar -xzf python.tar.gz -C $RUNNER_TOOL_CACHE/python
-          
-          # 4. 【關鍵】把這個新 Python 的路徑，加入到 CI/CD 的 PATH 中
-          # 這樣接下來的 'python' 指令就會是 3.12 版
           echo "$RUNNER_TOOL_CACHE/python/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
         run: |
-          # 'python' 指令現在會自動指向我們剛剛安裝的 3.12 版
-          python -m pip install --upgrade pip
+          # 步驟 1：【關鍵修復】
+          # 'python' -> 'python3'
+          python3 -m pip install --upgrade pip
           
-          # 這裡會使用 Python 3.12，所以 'greenlet', 'orjson' 等套件會編譯成功
-          pip install -r backend/requirements.txt
+          # 'pip' -> 'python3 -m pip' (更保險的作法)
+          python3 -m pip install -r backend/requirements.txt
           
-          pip install pytest pytest-mock pytest-cov
-          pip install "bcrypt==4.1.3" # 強制 bcrypt 版本
+          python3 -m pip install pytest pytest-mock pytest-cov
+          python3 -m pip install "bcrypt==4.1.3" # 強制 bcrypt 版本
 
       - name: Run integration tests (with mock DB)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           cd backend
-          # 使用 3.12 版的 Python 搭配 -m 旗標
-          python -m pytest tests/integration --cov=src --cov-report=xml --disable-warnings
+          # 步驟 2：【關鍵修復】
+          # 'python' -> 'python3'
+          python3 -m pytest tests/integration --cov=src --cov-report=xml --disable-warnings
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
