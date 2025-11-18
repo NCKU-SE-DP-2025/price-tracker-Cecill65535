@@ -13,35 +13,42 @@ on:
 
 jobs:
   test:
-    runs-on: [F74144731]
+    runs-on: [F74144731] # 你的 Runner ID
+    
+    # 步驟 1：【關鍵修復】設定環境變數
+    # 告訴 setup-python 我們的工具快取路徑，以修復 Permission denied
+    env:
+      RUNNER_TOOL_CACHE: /Users/cecill/Documents/actions-runner/_work/_tool
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 修正 1：【關鍵修復】
-      # 刪除 'Set up Python' 步驟，因為它會導致 Permission denied
-      # 我們將改用你 Mac Runner 上已經有的 python3
-      
+      # 步驟 2：【關鍵修復】我們「必須」重新啟用 setup-python
+      # 這樣我們才能取得「相容的」 Python 3.12
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
       - name: Install dependencies
         run: |
-          # 修正 2：使用你 Mac 上的 python3
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r backend/requirements.txt
-          python3 -m pip install pytest pytest-mock pytest-cov
-          python3 -m pip install "bcrypt==4.1.3" # 強制 CI 也使用我們測試過可行的 bcrypt 4.1.3 版本
+          # 步驟 3：現在 'python' 這個指令會正確指向 3.12
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-mock pytest-cov
+          pip install "bcrypt==4.1.3" # 強制 bcrypt 版本
 
       - name: Run integration tests (with mock DB)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           cd backend
-          # 修正 3：【關鍵修復】
-          # 使用 python3 -m pytest，這和你本地端成功的指令等效
-          python3 -m pytest tests/integration --cov=src --cov-report=xml --disable-warnings
+          # 步驟 4：使用 'python' (3.12) 和 -m 旗標
+          python -m pytest tests/integration --cov=src --cov-report=xml --disable-warnings
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          # 修正 4：你的 coverage.xml 會被建立在 backend/ 裡面
           path: backend/coverage.xml
