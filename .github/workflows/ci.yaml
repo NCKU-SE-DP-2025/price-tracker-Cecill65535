@@ -19,17 +19,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 步驟 1：【關鍵修復】
-      # 刪除所有 'Set up Python' 或 'Manually install' 步驟。
-      # 我們要用你 Mac 上已經有的 python3 (3.14 版)。
+      # 我們刪除所有 'Set up Python' 步驟
       
       - name: Install dependencies
-        # 步驟 2：【關鍵修復】
-        # 加入 PyO3 環境變數，來修復 'Failed building wheel' 錯誤
-        env:
-          PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
+        # 步驟 1：【關鍵修復】
+        # 在執行任何 python 指令前，先在 shell 中「強制」設定這個環境變數
         run: |
-          # 這裡我們使用你 Mac 的 python3 (3.14 版)
+          export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+          
+          # 步驟 2：使用你 Mac 上的 python3 (3.14 版)
           python3 -m pip install --upgrade pip
           
           # 這裡現在會因為 PYO3...=1 而成功編譯
