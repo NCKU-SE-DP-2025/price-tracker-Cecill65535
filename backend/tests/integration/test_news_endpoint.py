@@ -151,36 +151,47 @@ def mock_openai(mocker, return_content):
     return mock_openai_client
 
 def test_search_news(mocker):
+    # 1. Mock OpenAI 關鍵字提取 (這部分沒變)
     mock_openai(mocker, "keywords")
 
-    # mock_get_new_info = mocker.patch("main.get_new_info", return_value=[
-    #     {"titleLink": "http://example.com/news1"}
-    # ])
-    mock_get_new_info = mocker.patch("src.core.scraper.NewsScraper.fetch_news_list", return_value=[
-        {"titleLink": "http://example.com/news1"}
-    ])
+    # 2. 【關鍵修復】 Mock 爬蟲的 get_headline
+    # 我們直接告訴測試：「只要有人呼叫爬蟲的 get_headline，你就回傳這個列表」
+    # 注意：這裡回傳的是 Headline 物件列表，因為你的 get_headline 實作回傳的就是這個
+    from src.crawler.crawler_base import Headline
+    
+    mock_headlines = [
+        Headline(title="Test Title", url="http://example.com/news1")
+    ]
+    
+    # 確保路徑指向你的 UDNCrawler 類別
+    mocker.patch("src.crawler.udn_crawler.UDNCrawler.get_headline", return_value=mock_headlines)
 
-    mock_get = mocker.patch("src.core.scraper.requests.get", return_value=mocker.Mock(
-        text="""
-        <html>
-        <h1 class="article-content__title">Test Title</h1>
-        <time class="article-content__time">2024-09-10</time>
-        <section class="article-content__editor">
-            <p>This is a test paragraph.</p>
-        </section>
-        </html>
-        """
-    ))
+    # 3. 【關鍵修復】 也要 Mock 爬蟲的 parse
+    # 因為 search_news 下一步會呼叫 parse 抓內文
+    from src.crawler.crawler_base import News
+    
+    mock_news = News(
+        title="Test Title",
+        url="http://example.com/news1",
+        time="2024-09-10",
+        content="This is a test paragraph."
+    )
+    
+    # 確保路徑指向你的 UDNCrawler 類別
+    mocker.patch("src.crawler.udn_crawler.UDNCrawler.parse", return_value=mock_news)
 
+    # 4. 發送請求
     request_body = {"prompt": "Test search prompt"}
-
     response = client.post("/api/v1/news/search_news", json=request_body)
 
+    # 5. 驗證結果
     assert response.status_code == 200
 
     data = response.json()
     assert len(data) == 1
     assert data[0]["title"] == "Test Title"
+    # 請根據你的 NewsService 實際回傳格式調整這兩行
+    # 如果你的 service 轉回了字典，這裡應該就能拿到 time 和 content
     assert data[0]["time"] == "2024-09-10"
     assert data[0]["content"] == "This is a test paragraph."
 

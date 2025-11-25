@@ -6,7 +6,7 @@ from src.database import get_db
 from src.news.schemas import PromptRequest, NewsSummaryRequestSchema
 from src.news.service import NewsRepository, UpvoteService, NewsService
 from src.core.ai import AIService
-from src.core.scraper import NewsScraper
+from src.crawler.udn_crawler import UDNCrawler
 from src.config import Config
 from src.auth.dependencies import get_current_user # 匯入依賴項
 from src.auth.models import User # 為了 get_current_user
@@ -21,19 +21,16 @@ router = APIRouter(
 # ===================================================================
 
 def get_ai_service():
-    """AIService 的依賴項"""
     config = Config() 
     return AIService(api_key=config.OPENAI_API_KEY)
 
 def get_scraper():
-    """NewsScraper 的依賴項"""
-    return NewsScraper()
+    return UDNCrawler()
 
 def get_news_service(
     ai_service: AIService = Depends(get_ai_service),
-    scraper: NewsScraper = Depends(get_scraper)
+    scraper: UDNCrawler = Depends(get_scraper)
 ):
-    """NewsService 的依賴項"""
     return NewsService(ai_service=ai_service, scraper=scraper)
 
 # ===================================================================
