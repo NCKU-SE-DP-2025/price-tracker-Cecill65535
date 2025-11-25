@@ -10,15 +10,16 @@ COPY requirements.txt .
 # 安裝dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 將當前目錄複製到容器内的工作目錄
+# 將當前目錄 (包含我們新建立的 src/ 資料夾) 複製到容器内的工作目錄
 COPY . .
 
 # 開啟端口
 EXPOSE 8000
 
-# 定義環境變量
-ENV MODULE_NAME="app.main"
-ENV VARIABLE_NAME="app"
+# ⭐️ 定義環境變量 (修正)
+# 我們的 app 現在位於 src.main
+ENV MODULE_NAME="src.main"
 
-# 使用 uvicorn 運行 fastapi 應用
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# ⭐️ 使用 uvicorn 運行 fastapi 應用 (修正)
+# 將 "app.main:app" 改為 "src.main:app"
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

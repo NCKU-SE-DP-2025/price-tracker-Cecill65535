@@ -4,65 +4,71 @@ on:
   push:
     branches:
       - 'main'
+      - 'develop'
+      - 'fix/integration'
   pull_request:
     branches:
       - 'main'
+      - 'develop'
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-
+    runs-on: [F74144731]
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.12"
+      # 步驟 1：下載並取得 Python 的「絕對路徑」
+      - name: Setup Portable Python 3.12
+        run: |
+          echo "Downloading Standalone Python 3.12 (aarch64)..."
+          curl -L "https://github.com/indygreg/python-build-standalone/releases/download/20241016/cpython-3.12.7+20241016-aarch64-apple-darwin-install_only.tar.gz" -o python.tar.gz
+          
+          echo "Extracting..."
+          mkdir -p python_env
+          tar -xzf python.tar.gz -C python_env
+          
+          # 找出相對路徑
+          REL_PATH=$(find python_env -path "*/bin/python3" | head -n 1)
+          
+          if [ -z "$REL_PATH" ]; then
+            echo "❌ Error: Python binary not found!"
+            find python_env
+            exit 1
+          fi
 
+          # 【關鍵修復】加上 $(pwd) 變成絕對路徑
+          # 這樣就算等一下 cd backend 也不會找不到
+          ABS_PATH="$(pwd)/$REL_PATH"
+          
+          echo "✅ Found Python at: $ABS_PATH"
+          
+          # 確保它是可執行的
+          chmod +x "$ABS_PATH"
+          
+          echo "PYTHON_EXE=$ABS_PATH" >> $GITHUB_ENV
+
+      # 步驟 2：安裝套件 (這一步你剛剛已經成功了)
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-          pip install pytest pytest-mock pytest-cov
+          echo "Using Python: $PYTHON_EXE"
+          
+          "$PYTHON_EXE" -m pip install --upgrade pip
+          "$PYTHON_EXE" -m pip install -r backend/requirements.txt
+          "$PYTHON_EXE" -m pip install pytest pytest-mock pytest-cov
+          "$PYTHON_EXE" -m pip install "bcrypt==4.1.3"
 
-      # - name: Run unit tests
-      #   env:
-      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      #   run: |
-      #     cd backend
-      #     pytest tests/unit --cov=src --cov-report=xml --disable-warnings
-
-      - name: Run integration tests (with mock DB)
+      # 步驟 3：執行測試
+      - name: Run integration tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           cd backend
-          pytest tests/integration --cov=src --cov-report=xml --disable-warnings
+          # 因為 $PYTHON_EXE 現在是絕對路徑，所以在 backend 裡面也找得到！
+          "$PYTHON_EXE" -m pytest tests/integration --cov=src --cov-report=xml --disable-warnings
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: coverage.xml
-
-  # lint:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v3
-
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v4
-  #       with:
-  #         python-version: "3.12"
-
-  #     - name: Install dependencies
-  #       run: |
-  #         python -m pip install --upgrade pip
-  #         pip install flake8
-
-  #     - name: Run flake8
-  #       run: |
-  #         flake8 backend --count --max-line-length=150 --statistics
+          path: backend/coverage.xml
