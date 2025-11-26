@@ -16,6 +16,7 @@ from src.auth.dependencies import auth_service
 from unittest.mock import Mock
 
 
+
 SECRET_KEY = "1892dhianiandowqd0n"
 ALGORITHM = "HS256"
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
