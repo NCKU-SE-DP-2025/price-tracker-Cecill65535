@@ -3,11 +3,19 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, StaticPool
 from sqlalchemy.orm import sessionmaker
 from src.main import app
+<<<<<<< HEAD
 
 # 修正 1: 改用 get_db
 from src.database import Base, get_db
 from src.auth.models import User
 from jose import jwt
+=======
+# from src.main import Base, session_opener
+from src.database import Base, SessionLocal as session_opener
+from src.auth.models import User
+from jose import jwt
+# from src.main import pwd_context
+>>>>>>> dec8e24dce679b9468ba0f1b894422b452b9f266
 from src.auth.dependencies import auth_service
 
 SECRET_KEY = "1892dhianiandowqd0n"
