@@ -11,6 +11,8 @@ from src.auth.models import User
 from src.news.schemas import NewsSummaryRequestSchema
 from src.auth.dependencies import auth_service
 from unittest.mock import Mock
+from src.auth.dependencies import get_current_user
+from src.auth.models import User
 
 # 引入你的新 Scraper 和 Data Object
 from src.core.scraper import NewsScraper, NewsData
@@ -42,6 +44,14 @@ def override_session_opener():
 
 
 app.dependency_overrides[get_db] = override_session_opener
+
+
+def override_get_current_user():
+    return User(id=1, username="testuser")
+
+
+app.dependency_overrides[get_current_user] = override_get_current_user
+
 client = TestClient(app)
 
 
