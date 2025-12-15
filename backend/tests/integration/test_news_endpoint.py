@@ -17,7 +17,12 @@ from src.core.scraper import NewsScraper, NewsData
 
 SECRET_KEY = "1892dhianiandowqd0n"
 ALGORITHM = "HS256"
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+
+# -------------------------------------------------------------
+# *** 核心修復 1: 將資料庫連接改為記憶體模式 ***
+# -------------------------------------------------------------
+SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
@@ -41,8 +46,29 @@ client = TestClient(app)
 
 
 # -------------------------------------------------------------
-# *** 這裡不需要修改，使用 module 作用域，只需要建立一次 ***
+# *** 核心修復 2: 新增自動清空 NewsArticle 表的 Fixture ***
 # -------------------------------------------------------------
+@pytest.fixture(scope="function", autouse=True)
+def clean_news_articles():
+    """在每個測試開始和結束後自動清空 NewsArticle 表格"""
+    db = next(override_session_opener())
+    try:
+        # 測試開始前清空
+        db.query(NewsArticle).delete()
+        db.commit()
+        yield db  # 執行測試
+    finally:
+        # 測試結束後再次清空
+        db.query(NewsArticle).delete()
+        db.commit()
+        db.close()
+
+
+# -------------------------------------------------------------
+# *** 以下 Fixtures 保持不變，或已根據上次的修改調整 ***
+# -------------------------------------------------------------
+
+
 @pytest.fixture(scope="module")
 def clear_users():
     with next(override_session_opener()) as db:
@@ -69,17 +95,11 @@ def test_token(test_user):
     return access_token
 
 
-# -------------------------------------------------------------
-# *** 核心修復: 更改為 function 作用域，確保每次測試都獨立 ***
-# -------------------------------------------------------------
+# test_articles 移除內部的清理邏輯，讓 clean_news_articles 處理
 @pytest.fixture(scope="function")
 def test_articles():
     db = next(override_session_opener())
     try:
-        # **【新增/移動】在每次測試開始前，清空資料庫中的所有 NewsArticle 記錄**
-        db.query(NewsArticle).delete()
-        db.commit()
-
         article_1 = NewsArticle(
             url="https://example.com/test-news-1",
             title="Test News 1",
@@ -102,24 +122,25 @@ def test_articles():
         db.refresh(article_2)
         yield [article_1, article_2]
     finally:
-        # 確保在測試結束後也清空一次，防止殘留
-        db.query(NewsArticle).delete()
-        db.commit()
+        # 由於 clean_news_articles 已經處理了清理，這裡 close 即可。
         db.close()
 
 
-# -------------------------------------------------------------
-# *** 核心修復: 更改為 function 作用域，以匹配 test_articles ***
-# -------------------------------------------------------------
 @pytest.fixture(scope="function")
 def test_user_and_articles(test_user, test_articles):
     return test_user, test_articles
+
+
+# -------------------------------------------------------------
+# *** 測試函式部分保持不變 ***
+# -------------------------------------------------------------
 
 
 def test_read_news(test_articles):
     response = client.get("/api/v1/news/news")
     assert response.status_code == 200
     json_response = response.json()
+    # 由於 clean_news_articles 運行在前，test_articles 寫入 2 篇，這裡應為 2
     assert len(json_response) == 2
 
 
@@ -151,14 +172,12 @@ def test_search_news(mocker):
     mock_openai(mocker, "keywords")
 
     # 2. Mock 爬蟲的 get_headline
-    # 修正：改用 NewsData，並 Mock 新的 scraper 路徑
     mock_headline_data = [NewsData(title="Test Title", url="http://example.com/news1")]
     mocker.patch(
         "src.core.scraper.NewsScraper.get_headline", return_value=mock_headline_data
     )
 
     # 3. Mock 爬蟲的 parse
-    # 修正：同樣改用 NewsData，補上 time 和 content
     mock_parsed_data = NewsData(
         title="Test Title",
         url="http://example.com/news1",
@@ -174,6 +193,7 @@ def test_search_news(mocker):
     # 5. 驗證結果
     assert response.status_code == 200
     data = response.json()
+    # clean_news_articles 已經確保資料庫是空的，所以 search 應該只回傳 1 篇爬蟲找到的
     assert len(data) == 1
     assert data[0]["title"] == "Test Title"
     assert data[0]["time"] == "2024-09-10"
