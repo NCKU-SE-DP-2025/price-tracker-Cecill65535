@@ -2,27 +2,33 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, StaticPool
 from sqlalchemy.orm import sessionmaker
-from src.main import app
-# from src.main import Base, session_opener
-from src.database import Base, SessionLocal as session_opener
+from src.main import create_app
+
+app = create_app()
+
+# 修正 1: 改用 get_db
+from src.database import Base, get_db
 from src.auth.models import User
 from jose import jwt
-# from src.main import pwd_context
 from src.auth.dependencies import auth_service
 
 SECRET_KEY = "1892dhianiandowqd0n"
 ALGORITHM = "HS256"
-# SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool)
 
+# 設定測試用的 SQLite
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 Base.metadata.create_all(bind=engine)
 
 pwd_context = auth_service.pwd_context
 
-def override_session_opener():
+
+def override_get_db():
     try:
         db = TestingSessionLocal()
         yield db
@@ -30,21 +36,39 @@ def override_session_opener():
         db.close()
 
 
-app.dependency_overrides[session_opener] = override_session_opener
+# 修正 2: 覆蓋正確的依賴 (get_db)
+_prev_get_db_override = app.dependency_overrides.get(get_db)
+app.dependency_overrides[get_db] = override_get_db
+
+
+@pytest.fixture(scope="module", autouse=True)
+def restore_get_db_override():
+    try:
+        yield
+    finally:
+        if _prev_get_db_override is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = _prev_get_db_override
+
 
 client = TestClient(app)
 
+
 @pytest.fixture(scope="module")
 def clear_users():
-    with next(override_session_opener()) as db:
+    # 修正 3: 使用 override_get_db
+    with next(override_get_db()) as db:
         db.query(User).delete()
         db.commit()
+
 
 @pytest.fixture(scope="module")
 def test_user(clear_users):
     hashed_password = pwd_context.hash("testpassword")
 
-    with next(override_session_opener()) as db:
+    # 修正 4: 使用 override_get_db
+    with next(override_get_db()) as db:
         user = User(username="testuser", hashed_password=hashed_password)
         db.add(user)
         db.commit()
@@ -54,15 +78,17 @@ def test_user(clear_users):
 
 @pytest.fixture(scope="module")
 def test_token(test_user):
-    access_token = jwt.encode({"sub": test_user.username}, SECRET_KEY, algorithm=ALGORITHM)
+    access_token = jwt.encode(
+        {"sub": test_user.username}, SECRET_KEY, algorithm=ALGORITHM
+    )
     return access_token
 
 
 def test_register_user():
-    response = client.post("/api/v1/users/register", json={
-        "username": "newuser",
-        "password": "newpassword"
-    })
+    response = client.post(
+        "/api/v1/users/register",
+        json={"username": "newuser", "password": "newpassword"},
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -70,10 +96,9 @@ def test_register_user():
 
 
 def test_login_for_access_token(test_user):
-    response = client.post("/api/v1/users/login", data={
-        "username": "testuser",
-        "password": "testpassword"
-    })
+    response = client.post(
+        "/api/v1/users/login", data={"username": "testuser", "password": "testpassword"}
+    )
 
     assert response.status_code == 200
     data = response.json()

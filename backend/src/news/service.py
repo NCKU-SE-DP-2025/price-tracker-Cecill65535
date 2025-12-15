@@ -3,14 +3,10 @@ import itertools
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import delete, insert, select
-
-# 匯入我們自己寫的 .models
 from .models import NewsArticle, user_news_association_table
-
-# 匯入 core 裡的 service
 from src.core.ai import AIService
-from src.core.scraper import NewsScraper
-# ==================== News Repository ====================
+from src.crawler.crawler_base import NewsCrawlerBase
+
 class NewsRepository:
     def __init__(self, db: Session):
         self.db = db
@@ -44,7 +40,6 @@ class NewsRepository:
         """Count total articles"""
         return self.db.query(NewsArticle).count()
     
-# ==================== Upvote Service ====================
 class UpvoteService:
     def __init__(self, db: Session):
         self.db = db
@@ -92,9 +87,9 @@ class UpvoteService:
             self.db.execute(insert_stmt)
             self.db.commit()
             return "Article upvoted"
-# ==================== News Service ====================
+
 class NewsService:
-    def __init__(self, ai_service: AIService, scraper: NewsScraper):
+    def __init__(self, ai_service: AIService, scraper: NewsCrawlerBase):
         self.ai_service = ai_service
         self.scraper = scraper
         self._id_counter = itertools.count(start=1000000)
@@ -102,36 +97,53 @@ class NewsService:
     def fetch_and_process_initial_news(self, db: Session, is_initial: bool = False):
         """Fetch and process initial news about prices"""
         news_repo = NewsRepository(db)
-        news_list = self.scraper.fetch_news_list("價格", is_initial=is_initial)
+        
+        page_param = (1, 10) if is_initial else 1
+        news_list = self.scraper.get_headline("價格", page=page_param)
         
         for news in news_list:
-            title = news["title"]
+            title = news.title
             relevance = self.ai_service.evaluate_relevance(title)
             
             if relevance == "high":
                 try:
-                    detailed_news = self.scraper.fetch_article_content(news["titleLink"])
-                    content_text = " ".join(detailed_news["content"])
+                    news_obj = self.scraper.parse(news.url)
+                    
+                    content_text = news_obj.content
                     
                     summary_result = self.ai_service.generate_summary(content_text)
-                    detailed_news["summary"] = summary_result["影響"]
-                    detailed_news["reason"] = summary_result["原因"]
                     
-                    news_repo.add_article(detailed_news)
+                    news_data_dict = {
+                        "url": str(news_obj.url),
+                        "title": news_obj.title,
+                        "time": news_obj.time,
+                        "content": news_obj.content,
+                        "summary": summary_result["影響"],
+                        "reason": summary_result["原因"]
+                    }
+                    
+                    news_repo.add_article(news_data_dict)
                 except Exception as e:
                     print(f"Error processing news: {e}")
     
     def search_news(self, prompt: str) -> list:
         """Search news based on user prompt"""
         keywords = self.ai_service.extract_keywords(prompt)
-        news_items = self.scraper.fetch_news_list(keywords, is_initial=False)
+        
+        news_items = self.scraper.get_headline(keywords, page=1)
         news_list = []
         
         for news in news_items:
             try:
-                detailed_news = self.scraper.fetch_article_content(news["titleLink"])
-                detailed_news["content"] = " ".join(detailed_news["content"])
-                detailed_news["id"] = next(self._id_counter)
+                news_obj = self.scraper.parse(news.url)
+                
+                detailed_news = {
+                    "url": str(news_obj.url),
+                    "title": news_obj.title,
+                    "time": news_obj.time,
+                    "content": news_obj.content,
+                    "id": next(self._id_counter)
+                }
                 news_list.append(detailed_news)
             except Exception as e:
                 print(f"Error fetching news: {e}")

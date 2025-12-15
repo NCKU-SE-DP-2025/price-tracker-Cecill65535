@@ -11,7 +11,6 @@ user_news_association_table = Table(
 
 class NewsArticle(Base):
     __tablename__ = "news_articles"
-    # ⭐️ 修正：從 autoconfirm=True 改為 autoincrement=True
     id = Column(Integer, primary_key=True, autoincrement=True)
     url = Column(String, unique=True, nullable=False)
     title = Column(String, nullable=False)
