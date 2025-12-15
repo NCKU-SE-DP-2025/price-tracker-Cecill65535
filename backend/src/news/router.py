@@ -9,129 +9,78 @@ from src.core.ai import AIService
 from src.crawler.udn_crawler import UDNCrawler
 from src.config import Config
 from src.auth.dependencies import get_current_user
-from src.auth.models import User 
+from src.auth.models import User
 
-router = APIRouter(
-    prefix="/news",  
-    tags=["news"]
-)
+router = APIRouter(prefix="/news", tags=["news"])
 
-<<<<<<< HEAD
-def get_ai_service():
-    config = Config() 
-    return AIService(api_key=config.OPENAI_API_KEY)
-=======
-# ===================================================================
-# === 步驟 1：建立 Service 的「依賴項函式」(Factories) ===
-# ===================================================================
 
 def get_ai_service():
-    """AIService 的依賴項"""
-    config = Config() 
+    config = Config()
     return AIService(api_key=config.OPENAI_API_KEY)
 
-def get_scraper():
-    """NewsScraper 的依賴項"""
-    return NewsScraper()
-
-def get_news_service(
-    ai_service: AIService = Depends(get_ai_service),
-    scraper: NewsScraper = Depends(get_scraper)
-):
-    """NewsService 的依賴項"""
-    return NewsService(ai_service=ai_service, scraper=scraper)
-
-# ===================================================================
-# === 步驟 2：刪除在「全域」建立的實例 ===
-# ===================================================================
-
-# (我們把這幾行刪除或註解掉，因為它們是 Bug 的來源)
-# config = Config()
-# ai_service_instance = AIService(config.OPENAI_API_KEY)
-# news_service_instance = NewsService(ai_service_instance, NewsScraper())
->>>>>>> dec8e24dce679b9468ba0f1b894422b452b9f266
 
 def get_scraper():
     return UDNCrawler()
 
+
 def get_news_service(
     ai_service: AIService = Depends(get_ai_service),
-    scraper: UDNCrawler = Depends(get_scraper)
+    scraper: UDNCrawler = Depends(get_scraper),
 ):
     return NewsService(ai_service=ai_service, scraper=scraper)
 
-<<<<<<< HEAD
-=======
-# ===================================================================
-# === 步驟 3：在路由中「注入」依賴項 ===
-# ===================================================================
 
-# 3. 這是【讀取所有新聞】路由 (這個路由OK，不需要 NewsService)
->>>>>>> dec8e24dce679b9468ba0f1b894422b452b9f266
 @router.get("/news")
 def read_all_news(db: Session = Depends(get_db)):
     news_repo = NewsRepository(db)
     upvote_service = UpvoteService(db)
     articles = news_repo.get_all_articles()
-    
+
     result = []
     for article in articles:
-        upvotes, upvoted = upvote_service.get_upvote_details(article.id, None) 
+        upvotes, upvoted = upvote_service.get_upvote_details(article.id, None)
         result.append({**article.__dict__, "upvotes": upvotes, "is_upvoted": upvoted})
     return result
 
-<<<<<<< HEAD
-=======
-# 4. 這是【讀取用戶相關新聞】路由 (這個路由OK，不需要 NewsService)
->>>>>>> dec8e24dce679b9468ba0f1b894422b452b9f266
+
 @router.get("/user_news")
 def read_user_news(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user) 
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     news_repo = NewsRepository(db)
     upvote_service = UpvoteService(db)
     articles = news_repo.get_all_articles()
-    
+
     result = []
     for article in articles:
-        upvotes, upvoted = upvote_service.get_upvote_details(article.id, current_user.id)
+        upvotes, upvoted = upvote_service.get_upvote_details(
+            article.id, current_user.id
+        )
         result.append({**article.__dict__, "upvotes": upvoted, "is_upvoted": upvoted})
     return result
 
+
 @router.post("/search_news")
 def search_news(
-    request: PromptRequest,
-<<<<<<< HEAD
-    news_service: NewsService = Depends(get_news_service)
+    request: PromptRequest, news_service: NewsService = Depends(get_news_service)
 ):
-=======
-    news_service: NewsService = Depends(get_news_service) # ⭐️ 修正：注入 NewsService
-):
-    # ⭐️ 修正：使用被注入的 news_service
->>>>>>> dec8e24dce679b9468ba0f1b894422b452b9f266
     return news_service.search_news(request.prompt)
+
 
 @router.post("/news_summary")
 def news_summary(
     payload: NewsSummaryRequestSchema,
-    current_user: User = Depends(get_current_user), 
-    news_service: NewsService = Depends(get_news_service) # ⭐️ 修正：注入 NewsService
+    current_user: User = Depends(get_current_user),
+    news_service: NewsService = Depends(get_news_service),  # ⭐️ 修正：注入 NewsService
 ):
-<<<<<<< HEAD
     return news_service.generate_news_summary(payload.content)
 
-=======
-    # ⭐️ 修正：使用被注入的 news_service
-    return news_service.generate_news_summary(payload.content)
 
-# 7. 這是【按讚】路由 (這個路由OK，不需要 NewsService)
->>>>>>> dec8e24dce679b9468ba0f1b894422b452b9f266
 @router.post("/{id}/upvote")
 def upvote_article(
     id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user) 
+    current_user: User = Depends(get_current_user),
 ):
     upvote_service = UpvoteService(db)
     message = upvote_service.toggle_upvote(id, current_user.id)
