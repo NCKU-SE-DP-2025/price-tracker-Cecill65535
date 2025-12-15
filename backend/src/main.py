@@ -24,8 +24,50 @@ Base.metadata.create_all(bind=engine)
 # 2. 讀取設定
 config = Config()
 
+
 # 3. 建立 FastAPI App 實例
-app = FastAPI()
+def create_app() -> FastAPI:
+    """Application factory: returns a new FastAPI instance configured
+    with routers, middleware and startup/shutdown handlers. Tests
+    should call `create_app()` to get an isolated app instance.
+    """
+    app = FastAPI()
+
+    # Sentry initialization is global-safe (no per-app state required)
+    sentry_sdk.init(
+        dsn=config.SENTRY_DSN,
+        traces_sample_rate=1.0,
+        profiles_sample_rate=1.0,
+    )
+
+    # Middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=config.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # include routers
+    app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(news_router, prefix="/api/v1")
+    app.include_router(prices_router, prefix="/api/v1")
+
+    # attach startup/shutdown handlers
+    @app.on_event("startup")
+    def _startup():
+        start_scheduler()
+
+    @app.on_event("shutdown")
+    def _shutdown():
+        shutdown_scheduler()
+
+    return app
+
+
+# Backwards compatible default app instance
+app = create_app()
 
 # 4. 設定 Sentry
 sentry_sdk.init(

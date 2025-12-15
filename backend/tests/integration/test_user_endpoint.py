@@ -2,7 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, StaticPool
 from sqlalchemy.orm import sessionmaker
-from src.main import app
+from src.main import create_app
+
+app = create_app()
 
 # 修正 1: 改用 get_db
 from src.database import Base, get_db
@@ -35,7 +37,20 @@ def override_get_db():
 
 
 # 修正 2: 覆蓋正確的依賴 (get_db)
+_prev_get_db_override = app.dependency_overrides.get(get_db)
 app.dependency_overrides[get_db] = override_get_db
+
+
+@pytest.fixture(scope="module", autouse=True)
+def restore_get_db_override():
+    try:
+        yield
+    finally:
+        if _prev_get_db_override is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = _prev_get_db_override
+
 
 client = TestClient(app)
 

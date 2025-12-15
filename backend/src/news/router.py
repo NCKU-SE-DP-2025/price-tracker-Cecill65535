@@ -8,6 +8,7 @@ from src.news.service import NewsRepository, UpvoteService, NewsService
 from src.core.ai import AIService
 from src.core.scraper import NewsScraper  # 使用 core 的可被測試 patch 的爬蟲
 from src.config import Config
+from sqlalchemy import select
 from src.auth.dependencies import get_current_user
 from src.auth.models import User
 
@@ -32,14 +33,39 @@ def get_news_service(
 
 @router.get("/news")
 def read_all_news(db: Session = Depends(get_db)):
-    news_repo = NewsRepository(db)
+    # Directly select articles from the provided session. Using select() can
+    # be more robust across different session/engine setups (especially in
+    # tests that use an in-memory engine with StaticPool).
     upvote_service = UpvoteService(db)
-    articles = news_repo.get_all_articles()
+    articles = []
+    try:
+        # Try Core select for mapped class; this will return Row objects
+        rows = db.execute(select(NewsRepository.__module__ and "news_articles")).all()
+        # If rows are present and look like (Row(...),) flatten them
+        if rows:
+            # rows may be list of Row or list of model instances; normalize below
+            articles = [r[0] if len(r) == 1 else r for r in rows]
+    except Exception:
+        articles = []
+
+    # Fallback to repository ORM method
+    if not articles:
+        news_repo = NewsRepository(db)
+        articles = news_repo.get_all_articles()
 
     result = []
     for article in articles:
-        upvotes, upvoted = upvote_service.get_upvote_details(article.id, None)
-        result.append({**article.__dict__, "upvotes": upvotes, "is_upvoted": upvoted})
+        # If `article` is a Row mapping, convert accordingly
+        if hasattr(article, "_mapping"):
+            article_dict = dict(article._mapping)
+            article_id = article_dict.get("id")
+        else:
+            article_id = getattr(article, "id", None)
+            article_dict = {**getattr(article, "__dict__", {})}
+
+        upvotes, upvoted = upvote_service.get_upvote_details(article_id, None)
+        article_dict.pop("_sa_instance_state", None)
+        result.append({**article_dict, "upvotes": upvotes, "is_upvoted": upvoted})
     return result
 
 

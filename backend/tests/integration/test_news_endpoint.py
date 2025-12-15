@@ -4,7 +4,9 @@ from sqlalchemy import create_engine, StaticPool
 from sqlalchemy.orm import sessionmaker
 import json
 from jose import jwt
-from src.main import app
+from src.main import create_app
+
+app = create_app()
 from src.news.models import NewsArticle
 from src.database import Base, get_db
 from src.auth.models import User
@@ -43,6 +45,7 @@ def override_session_opener():
         db.close()
 
 
+_prev_get_db_override = app.dependency_overrides.get(get_db)
 app.dependency_overrides[get_db] = override_session_opener
 
 
@@ -50,7 +53,27 @@ def override_get_current_user():
     return User(id=1, username="testuser")
 
 
+_prev_get_current_user_override = app.dependency_overrides.get(get_current_user)
 app.dependency_overrides[get_current_user] = override_get_current_user
+
+
+@pytest.fixture(scope="module", autouse=True)
+def restore_overrides():
+    # Ensure other test modules do not clobber our overrides permanently.
+    try:
+        yield
+    finally:
+        # restore previous overrides (None if not present)
+        if _prev_get_db_override is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = _prev_get_db_override
+
+        if _prev_get_current_user_override is None:
+            app.dependency_overrides.pop(get_current_user, None)
+        else:
+            app.dependency_overrides[get_current_user] = _prev_get_current_user_override
+
 
 client = TestClient(app)
 
