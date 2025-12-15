@@ -40,6 +40,9 @@ app.dependency_overrides[get_db] = override_session_opener
 client = TestClient(app)
 
 
+# -------------------------------------------------------------
+# *** 這裡不需要修改，使用 module 作用域，只需要建立一次 ***
+# -------------------------------------------------------------
 @pytest.fixture(scope="module")
 def clear_users():
     with next(override_session_opener()) as db:
@@ -66,10 +69,14 @@ def test_token(test_user):
     return access_token
 
 
-@pytest.fixture(scope="module")
+# -------------------------------------------------------------
+# *** 核心修復: 更改為 function 作用域，確保每次測試都獨立 ***
+# -------------------------------------------------------------
+@pytest.fixture(scope="function")
 def test_articles():
     db = next(override_session_opener())
     try:
+        # **【新增/移動】在每次測試開始前，清空資料庫中的所有 NewsArticle 記錄**
         db.query(NewsArticle).delete()
         db.commit()
 
@@ -95,12 +102,16 @@ def test_articles():
         db.refresh(article_2)
         yield [article_1, article_2]
     finally:
+        # 確保在測試結束後也清空一次，防止殘留
         db.query(NewsArticle).delete()
         db.commit()
         db.close()
 
 
-@pytest.fixture(scope="module")
+# -------------------------------------------------------------
+# *** 核心修復: 更改為 function 作用域，以匹配 test_articles ***
+# -------------------------------------------------------------
+@pytest.fixture(scope="function")
 def test_user_and_articles(test_user, test_articles):
     return test_user, test_articles
 
