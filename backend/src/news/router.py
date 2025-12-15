@@ -56,7 +56,7 @@ def read_user_news(
         upvotes, upvoted = upvote_service.get_upvote_details(
             article.id, current_user.id
         )
-        result.append({**article.__dict__, "upvotes": upvoted, "is_upvoted": upvoted})
+        result.append({**article.__dict__, "upvotes": upvotes, "is_upvoted": upvoted})
     return result
 
 
