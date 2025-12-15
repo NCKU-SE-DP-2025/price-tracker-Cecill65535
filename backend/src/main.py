@@ -56,17 +56,18 @@ scheduler = BackgroundScheduler()
 ai_service_instance = AIService(config.OPENAI_API_KEY)
 news_service_instance = NewsService(ai_service_instance, NewsScraper())
 
+
 @app.on_event("startup")
 def start_scheduler():
     # db = next(get_db()) # 使用我們新的 get_db()
     # news_repo = NewsRepository(db)
-    
+
     # if news_repo.count_articles() == 0:
     #     print("資料庫為空，開始抓取初始新聞... (此功能已暫時停用)")
     #     # news_service_instance.fetch_and_process_initial_news(db, is_initial=True)
-    
+
     # db.close() # 記得關閉
-    
+
     # 我們也暫時停掉背景任務
     # scheduler.add_job(
     #     lambda: news_service_instance.fetch_and_process_initial_news(
@@ -76,7 +77,8 @@ def start_scheduler():
     #     minutes=100
     # )
     # scheduler.start()
-    print("FastAPI 啟動完成！(已跳過啟動爬蟲任務)") # 新增一行提示
+    print("FastAPI 啟動完成！(已跳過啟動爬蟲任務)")  # 新增一行提示
+
 
 @app.on_event("shutdown")
 def shutdown_scheduler():
