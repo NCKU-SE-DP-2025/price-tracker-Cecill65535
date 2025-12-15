@@ -10,7 +10,7 @@ from src.config import Config
 
 # 匯入 階段 3 的檔案 (為了 startup)
 from src.core.ai import AIService
-from src.core.scraper import NewsScraper  # 使用 core 的可被測試 patch 的爬蟲
+from src.crawler.udn_crawler import UDNCrawler  # 改這行
 from src.news.service import NewsService, NewsRepository
 
 # 匯入 階段 4 的 Router 檔案
@@ -94,8 +94,7 @@ app.include_router(prices_router, prefix="/api/v1")
 # 7. 設定背景任務與 Service
 scheduler = BackgroundScheduler()
 ai_service_instance = AIService(config.OPENAI_API_KEY)
-# 使用 NewsScraper (雖然名字是舊的，但 Docker 裡的邏輯是新的)
-news_service_instance = NewsService(ai_service_instance, NewsScraper())
+news_service_instance = NewsService(ai_service_instance, UDNCrawler())
 
 
 @app.on_event("startup")
@@ -158,4 +157,4 @@ def shutdown_scheduler():
 
 
 def get_scraper():
-    return NewsScraper()
+    return UDNCrawler()

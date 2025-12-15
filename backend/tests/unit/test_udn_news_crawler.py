@@ -1,18 +1,15 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-# 修正 1: 改成從正確的位置 (src.core.scraper) 匯入 NewsScraper
-from src.core.scraper import NewsScraper
+from src.crawler.udn_crawler import UDNCrawler
 
 
 class TestUDNCrawler(unittest.TestCase):
     def setUp(self):
-        # 修正 2: 實例化 NewsScraper 而不是 UDNCrawler
-        self.crawler = NewsScraper()
+        self.crawler = UDNCrawler()
 
     # 測試 1: 測試抓標題 (get_headline)
-    # 修正 3: Patch 的路徑要指到 src.core.scraper
-    @patch("src.core.scraper.requests.get")
+    @patch("src.crawler.udn_crawler.requests.get")
     def test_get_headline(self, mock_get):
         # === 1. 準備劇本 (Mock) ===
         mock_response = MagicMock()
@@ -36,8 +33,7 @@ class TestUDNCrawler(unittest.TestCase):
         self.assertEqual(headlines[0].url, "http://udn.com/news1")
 
     # 測試 2: 測試解析內文 (parse)
-    # 修正 4: Patch 的路徑要指到 src.core.scraper
-    @patch("src.core.scraper.requests.get")
+    @patch("src.crawler.udn_crawler.requests.get")
     def test_parse(self, mock_get):
         # === 1. 準備劇本 (Mock) ===
         mock_response = MagicMock()

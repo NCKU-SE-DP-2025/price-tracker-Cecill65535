@@ -16,8 +16,8 @@ from unittest.mock import Mock
 from src.auth.dependencies import get_current_user
 from src.auth.models import User
 
-# 引入你的新 Scraper 和 Data Object
-from src.core.scraper import NewsScraper, NewsData
+# 引入爬蟲
+from src.crawler.udn_crawler import UDNCrawler
 
 SECRET_KEY = "1892dhianiandowqd0n"
 ALGORITHM = "HS256"
@@ -205,19 +205,24 @@ def test_search_news(mocker):
     mock_openai(mocker, "keywords")
 
     # 2. Mock 爬蟲的 get_headline
-    mock_headline_data = [NewsData(title="Test Title", url="http://example.com/news1")]
+    from src.crawler.crawler_base import Headline, News
+
+    mock_headline_data = [Headline(title="Test Title", url="http://example.com/news1")]
     mocker.patch(
-        "src.core.scraper.NewsScraper.get_headline", return_value=mock_headline_data
+        "src.crawler.udn_crawler.UDNCrawler.get_headline",
+        return_value=mock_headline_data,
     )
 
     # 3. Mock 爬蟲的 parse
-    mock_parsed_data = NewsData(
+    mock_parsed_data = News(
         title="Test Title",
         url="http://example.com/news1",
         time="2024-09-10",
         content="This is a test paragraph.",
     )
-    mocker.patch("src.core.scraper.NewsScraper.parse", return_value=mock_parsed_data)
+    mocker.patch(
+        "src.crawler.udn_crawler.UDNCrawler.parse", return_value=mock_parsed_data
+    )
 
     # 4. 發送請求
     request_body = {"prompt": "Test search prompt"}
