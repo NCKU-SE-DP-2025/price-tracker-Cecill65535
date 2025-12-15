@@ -6,7 +6,7 @@ from src.database import get_db
 from src.news.schemas import PromptRequest, NewsSummaryRequestSchema
 from src.news.service import NewsRepository, UpvoteService, NewsService
 from src.core.ai import AIService
-from src.crawler.udn_crawler import UDNCrawler
+from src.core.scraper import NewsScraper  # 使用 core 的可被測試 patch 的爬蟲
 from src.config import Config
 from src.auth.dependencies import get_current_user
 from src.auth.models import User
@@ -20,12 +20,12 @@ def get_ai_service():
 
 
 def get_scraper():
-    return UDNCrawler()
+    return NewsScraper()
 
 
 def get_news_service(
     ai_service: AIService = Depends(get_ai_service),
-    scraper: UDNCrawler = Depends(get_scraper),
+    scraper: NewsScraper = Depends(get_scraper),
 ):
     return NewsService(ai_service=ai_service, scraper=scraper)
 

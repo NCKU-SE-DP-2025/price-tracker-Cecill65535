@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import sentry_sdk
 from apscheduler.schedulers.background import BackgroundScheduler
+import sys
 
 # 匯入 階段 1 的檔案
 from src.database import Base, engine, get_db
@@ -9,7 +10,7 @@ from src.config import Config
 
 # 匯入 階段 3 的檔案 (為了 startup)
 from src.core.ai import AIService
-from src.core.scraper import NewsScraper
+from src.core.scraper import NewsScraper  # 使用 core 的可被測試 patch 的爬蟲
 from src.news.service import NewsService, NewsRepository
 
 # 匯入 階段 4 的 Router 檔案
@@ -57,36 +58,31 @@ news_service_instance = NewsService(ai_service_instance, NewsScraper())
 
 @app.on_event("startup")
 def start_scheduler():
-    """
-    應用程式啟動時執行：
-    1. 檢查資料庫有沒有新聞，沒有就抓一次 (Initial Fetch)。
-    2. 啟動背景排程，定期抓新聞 (Scheduler)。
-    """
+    # 如果在 pytest 環境下執行，跳過啟動爬蟲與排程（避免污染測試 DB 與進行網路呼叫）
+    if "pytest" in sys.modules:
+        print("[Startup] Detected pytest - skipping initial fetch and scheduler.")
+        return
+
     print("[System] Startup: 初始化爬蟲任務...")
 
-    # --- 任務 1: 初始新聞檢查 ---
     # 建立一個臨時的 DB Session 來做檢查
     db = next(get_db())
     try:
         news_repo = NewsRepository(db)
-        # 如果資料庫是空的，就跑一次初始抓取
         if news_repo.count_articles() == 0:
-            print(
-                "[Info] 資料庫為空，開始執行「初始新聞抓取」 (這可能需要 1-2 分鐘)..."
-            )
+            print("[Info] 資料庫為空，開始執行「初始新聞抓取」...")
             news_service_instance.fetch_and_process_initial_news(db, is_initial=True)
             print("[Success] 初始新聞抓取完成！")
         else:
             print("[Info] 資料庫已有資料，跳過初始抓取。")
     except Exception as e:
-        # 這裡加了保護，就算初始爬蟲失敗，伺服器也能照常啟動
         print(f"[Error] 初始爬蟲失敗 (跳過，不影響伺服器啟動): {e}")
     finally:
-        db.close()  # 務必關閉 Session
+        db.close()
 
-    # --- 任務 2: 啟動定期排程 ---
+    # 啟動排程（只有非測試環境會到這）
     try:
-        # 定義排程要做的事：每次都要拿一個新的 DB Session
+
         def scheduled_news_job():
             print("[Scheduler] 排程任務啟動：開始背景抓取新聞...")
             job_db = next(get_db())
@@ -100,11 +96,9 @@ def start_scheduler():
             finally:
                 job_db.close()
 
-        # 設定每 100 分鐘執行一次 (你可以依需求調整 minutes)
         scheduler.add_job(scheduled_news_job, "interval", minutes=100)
         scheduler.start()
         print("[System] 背景排程器 (Scheduler) 已啟動。")
-
     except Exception as e:
         print(f"[Error] 排程器啟動失敗: {e}")
 
@@ -119,3 +113,7 @@ def shutdown_scheduler():
         print("[System] 排程器已安全關閉。")
     except Exception as e:
         print(f"[Error] 關閉排程器時發生錯誤: {e}")
+
+
+def get_scraper():
+    return NewsScraper()
