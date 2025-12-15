@@ -164,16 +164,10 @@ def test_user_and_articles(test_user, test_articles):
     return test_user, test_articles
 
 
-# -------------------------------------------------------------
-# *** 測試函式部分保持不變 ***
-# -------------------------------------------------------------
-
-
 def test_read_news(test_articles):
     response = client.get("/api/v1/news/news")
     assert response.status_code == 200
     json_response = response.json()
-    # 由於 clean_news_articles 運行在前，test_articles 寫入 2 篇，這裡應為 2
     assert len(json_response) == 2
 
 
