@@ -1,67 +1,53 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+from pydantic import AnyHttpUrl
+from src.crawler.crawler_base import NewsCrawlerBase, News, Headline
+from src.crawler.exceptions import DomainMismatchException
 
-# 修正 1: 改成從正確的位置 (src.core.scraper) 匯入 NewsScraper
-from src.core.scraper import NewsScraper
+
+# --- 替身爬蟲 (Mock) ---
+# 因為 BaseCrawler 是抽象的，不能直接跑，所以我們做一個假的替身來測試它
+class MockNewsCrawler(NewsCrawlerBase):
+    news_website_url = "https://www.example.com"
+    news_website_news_child_urls = ["https://news.example.com"]
+
+    def get_headline(self, search_term: str, page: int | tuple[int, int]):
+        return [Headline(title="Test Article", url="https://www.example.com/article")]
+
+    def parse(self, url: AnyHttpUrl | str):
+        return News(
+            title="Test Article",
+            url=url,
+            time="2023-09-08T00:00:00",
+            content="This is the content of the article.",
+        )
+
+    @staticmethod
+    def save(news: News, db=None):
+        return True
 
 
-class TestUDNCrawler(unittest.TestCase):
+# --- 測試案例 ---
+class TestNewsCrawlerBase(unittest.TestCase):
+
     def setUp(self):
-        # 修正 2: 實例化 NewsScraper 而不是 UDNCrawler
-        self.crawler = NewsScraper()
+        self.crawler = MockNewsCrawler()
 
-    # 測試 1: 測試抓標題 (get_headline)
-    # 修正 3: Patch 的路徑要指到 src.core.scraper
-    @patch("src.core.scraper.requests.get")
-    def test_get_headline(self, mock_get):
-        # === 1. 準備劇本 (Mock) ===
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "lists": [
-                {"title": "Fake News 1", "titleLink": "http://udn.com/news1"},
-                {"title": "Fake News 2", "titleLink": "http://udn.com/news2"},
-            ]
-        }
-        mock_response.status_code = 200
-        mock_get.return_value = mock_response
+    def test_is_valid_url_valid(self):
+        # 測試：正確的網址應該回傳 True
+        valid_url = "https://www.example.com/article"
+        self.assertTrue(self.crawler._is_valid_url(valid_url))
 
-        # === 2. 執行測試 ===
-        # 這裡呼叫的新版 get_headline 回傳的是 NewsData 物件列表
-        headlines = self.crawler.get_headline(search_term="test", page=1)
+    def test_is_valid_url_invalid(self):
+        # 測試：錯誤的網址應該回傳 False
+        invalid_url = "https://www.invalid.com/article"
+        self.assertFalse(self.crawler._is_valid_url(invalid_url))
 
-        # === 3. 檢查結果 ===
-        self.assertEqual(len(headlines), 2)
-        # 這裡原本就寫對了 (headlines[0].title)，完全符合新版 OOP 的用法
-        self.assertEqual(headlines[0].title, "Fake News 1")
-        self.assertEqual(headlines[0].url, "http://udn.com/news1")
-
-    # 測試 2: 測試解析內文 (parse)
-    # 修正 4: Patch 的路徑要指到 src.core.scraper
-    @patch("src.core.scraper.requests.get")
-    def test_parse(self, mock_get):
-        # === 1. 準備劇本 (Mock) ===
-        mock_response = MagicMock()
-        mock_response.text = """
-        <html>
-            <h1 class="article-content__title">Big Event</h1>
-            <time class="article-content__time">2024-01-01</time>
-            <section class="article-content__editor">
-                <p>First paragraph.</p>
-                <p>Second paragraph.</p>
-            </section>
-        </html>
-        """
-        mock_response.status_code = 200
-        mock_get.return_value = mock_response
-
-        # === 2. 執行測試 ===
-        news = self.crawler.parse("http://udn.com/some-news")
-
-        # === 3. 檢查結果 ===
-        self.assertEqual(news.title, "Big Event")
-        self.assertEqual(news.time, "2024-01-01")
-        self.assertIn("First paragraph.", news.content)
-        self.assertIn("Second paragraph.", news.content)
+    def test_validate_and_parse_raises_error(self):
+        # 測試：validate_and_parse 遇到錯的網址應該報錯
+        invalid_url = "https://www.invalid.com/article"
+        with self.assertRaises(DomainMismatchException):
+            self.crawler.validate_and_parse(invalid_url)
 
 
 if __name__ == "__main__":
